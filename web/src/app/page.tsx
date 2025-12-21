@@ -10,7 +10,6 @@ import {
   ArrowRight,
   Search,
   Percent,
-  Briefcase,
   Activity,
 } from "lucide-react";
 import { api, Market, Deal, MacroDataResponse } from "@/lib/api";
@@ -118,11 +117,11 @@ export default function DashboardPage() {
               Live data from Federal Reserve
             </span>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="text-center p-3 bg-blue-50 rounded-lg">
               <div className="flex items-center justify-center gap-1 text-blue-600 mb-1">
                 <Percent className="h-4 w-4" />
-                <span className="text-xs font-medium">30yr Mortgage</span>
+                <span className="text-xs font-medium">30yr Fixed</span>
               </div>
               <p className="text-2xl font-bold text-gray-900">
                 {macroData.mortgage_30yr?.toFixed(2)}%
@@ -131,7 +130,7 @@ export default function DashboardPage() {
             <div className="text-center p-3 bg-green-50 rounded-lg">
               <div className="flex items-center justify-center gap-1 text-green-600 mb-1">
                 <Percent className="h-4 w-4" />
-                <span className="text-xs font-medium">15yr Mortgage</span>
+                <span className="text-xs font-medium">15yr Fixed</span>
               </div>
               <p className="text-2xl font-bold text-gray-900">
                 {macroData.mortgage_15yr?.toFixed(2)}%
@@ -140,7 +139,7 @@ export default function DashboardPage() {
             <div className="text-center p-3 bg-purple-50 rounded-lg">
               <div className="flex items-center justify-center gap-1 text-purple-600 mb-1">
                 <Activity className="h-4 w-4" />
-                <span className="text-xs font-medium">Fed Funds Rate</span>
+                <span className="text-xs font-medium">Fed Funds</span>
               </div>
               <p className="text-2xl font-bold text-gray-900">
                 {macroData.fed_funds_rate?.toFixed(2)}%
@@ -153,15 +152,6 @@ export default function DashboardPage() {
               </div>
               <p className="text-2xl font-bold text-gray-900">
                 {macroData.treasury_10yr?.toFixed(2)}%
-              </p>
-            </div>
-            <div className="text-center p-3 bg-red-50 rounded-lg">
-              <div className="flex items-center justify-center gap-1 text-red-600 mb-1">
-                <Briefcase className="h-4 w-4" />
-                <span className="text-xs font-medium">Unemployment</span>
-              </div>
-              <p className="text-2xl font-bold text-gray-900">
-                {macroData.unemployment?.toFixed(1)}%
               </p>
             </div>
           </div>

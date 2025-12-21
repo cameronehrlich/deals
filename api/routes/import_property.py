@@ -25,6 +25,27 @@ class ImportUrlRequest(BaseModel):
     interest_rate: float = Field(default=0.07, ge=0.01, le=0.25)
 
 
+class ImportParsedRequest(BaseModel):
+    """Request to analyze a pre-parsed property (from local Electron scraping)."""
+
+    # Property data (already scraped locally)
+    address: str = Field(..., description="Street address")
+    city: str = Field(..., description="City name")
+    state: str = Field(..., min_length=2, max_length=2, description="State code")
+    zip_code: str = Field(..., description="ZIP code")
+    list_price: float = Field(..., gt=0, description="Listing price")
+    bedrooms: int = Field(default=3, ge=0, le=20)
+    bathrooms: float = Field(default=2.0, ge=0, le=20)
+    sqft: Optional[int] = Field(None, ge=100, le=100000)
+    property_type: str = Field(default="single_family_home")
+    source: str = Field(default="manual", description="Data source (zillow, redfin, realtor, manual)")
+    source_url: Optional[str] = Field(None, description="Original listing URL")
+
+    # Financing parameters
+    down_payment_pct: float = Field(default=0.25, ge=0.05, le=1.0)
+    interest_rate: float = Field(default=0.07, ge=0.01, le=0.25)
+
+
 class ImportUrlResponse(BaseModel):
     """Response from URL import."""
 
@@ -62,6 +83,7 @@ class MacroDataResponse(BaseModel):
 
     mortgage_30yr: Optional[float]
     mortgage_15yr: Optional[float]
+    mortgage_5yr_arm: Optional[float]
     unemployment: Optional[float]
     fed_funds_rate: Optional[float]
     treasury_10yr: Optional[float]
@@ -177,6 +199,151 @@ async def import_from_url(request: ImportUrlRequest):
         await aggregator.close()
 
 
+@router.post("/parsed", response_model=ImportUrlResponse)
+async def import_parsed_property(request: ImportParsedRequest):
+    """
+    Analyze a pre-parsed property.
+
+    Use this endpoint when property data has been scraped locally (e.g., by Electron app).
+    Skips server-side scraping and just enriches with rent/market data and runs analysis.
+    """
+    from datetime import datetime
+    from src.models.property import Property, PropertyType, PropertyStatus
+    from src.models.deal import Deal, DealPipeline
+    from src.models.financials import Financials, LoanTerms
+    from src.agents.deal_analyzer import DealAnalyzer
+
+    aggregator = DataAggregator()
+    warnings = []
+
+    try:
+        # Map property type
+        type_mapping = {
+            "single_family_home": PropertyType.SFH,
+            "single_family": PropertyType.SFH,
+            "condo": PropertyType.CONDO,
+            "townhouse": PropertyType.TOWNHOUSE,
+            "duplex": PropertyType.DUPLEX,
+            "triplex": PropertyType.TRIPLEX,
+            "fourplex": PropertyType.FOURPLEX,
+            "multi_family": PropertyType.MULTI_FAMILY,
+        }
+        prop_type = type_mapping.get(
+            request.property_type.lower().replace("-", "_").replace(" ", "_"),
+            PropertyType.SFH
+        )
+
+        # Create property object from parsed data
+        prop_id = f"{request.source}_{hash(request.source_url or request.address) % 1000000:06d}"
+        property = Property(
+            id=prop_id,
+            address=request.address,
+            city=request.city,
+            state=request.state,
+            zip_code=request.zip_code,
+            list_price=request.list_price,
+            property_type=prop_type,
+            bedrooms=request.bedrooms,
+            bathrooms=request.bathrooms,
+            sqft=request.sqft,
+            status=PropertyStatus.ACTIVE,
+            source=request.source,
+            source_url=request.source_url,
+        )
+
+        # Get rent estimate
+        rent_estimate = await aggregator.rentcast.get_rent_estimate(
+            address=request.address,
+            city=request.city,
+            state=request.state,
+            zip_code=request.zip_code,
+            bedrooms=request.bedrooms,
+            bathrooms=request.bathrooms,
+            sqft=request.sqft,
+        )
+
+        if rent_estimate:
+            property.estimated_rent = rent_estimate.rent_estimate
+        else:
+            warnings.append("Could not estimate rent. Using market average.")
+
+        # Get market data
+        market = await aggregator.get_market(request.city, request.state)
+        if not market:
+            warnings.append("Market data not available for this location.")
+
+        # Calculate financials
+        loan = LoanTerms(
+            down_payment_pct=request.down_payment_pct,
+            interest_rate=request.interest_rate,
+        )
+        financials = Financials.calculate(
+            purchase_price=request.list_price,
+            monthly_rent=property.estimated_rent or 0,
+            loan=loan,
+        )
+
+        # Create deal
+        deal = Deal(
+            property=property,
+            financials=financials,
+            market=market,
+            pipeline_status=DealPipeline.ANALYZED,
+            first_seen=datetime.now(),
+        )
+
+        # Analyze and score
+        analyzer = DealAnalyzer()
+        deal = analyzer.analyze_deal(deal)
+
+        # Build market detail if available
+        market_detail = None
+        if deal.market:
+            metrics = MarketMetrics.from_market(deal.market)
+            market_detail = {
+                "id": deal.market.id,
+                "name": deal.market.name,
+                "state": deal.market.state,
+                "metro": deal.market.metro,
+                "overall_score": metrics.overall_score,
+                "cash_flow_score": metrics.cash_flow_score,
+                "growth_score": metrics.growth_score,
+            }
+
+        # Build response
+        deal_detail = DealDetail(
+            id=deal.id,
+            property=_property_to_detail(deal.property),
+            score=_score_to_model(deal.score),
+            financials=_financials_to_detail(deal),
+            market=market_detail,
+            pipeline_status=deal.pipeline_status.value,
+            strategy=deal.strategy.value if deal.strategy else None,
+            pros=deal.pros,
+            cons=deal.cons,
+            red_flags=deal.red_flags,
+            notes=deal.notes,
+            first_seen=deal.first_seen,
+            last_analyzed=deal.last_analyzed,
+        )
+
+        return ImportUrlResponse(
+            success=True,
+            deal=deal_detail,
+            source=request.source,
+            message=f"Successfully analyzed property from {request.source}",
+            warnings=warnings,
+        )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Analysis failed: {str(e)}"
+        )
+    finally:
+        await aggregator.close()
+
+
 @router.post("/rent-estimate", response_model=RentEstimateResponse)
 async def get_rent_estimate(request: RentEstimateRequest):
     """
@@ -230,6 +397,7 @@ async def get_macro_data():
         return MacroDataResponse(
             mortgage_30yr=data.get("mortgage_30yr"),
             mortgage_15yr=data.get("mortgage_15yr"),
+            mortgage_5yr_arm=data.get("mortgage_5yr_arm"),
             unemployment=data.get("unemployment"),
             fed_funds_rate=data.get("fed_funds_rate"),
             treasury_10yr=data.get("treasury_10yr"),

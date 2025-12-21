@@ -170,10 +170,28 @@ export interface RentEstimateResponse {
 export interface MacroDataResponse {
   mortgage_30yr?: number;
   mortgage_15yr?: number;
+  mortgage_5yr_arm?: number;
   unemployment?: number;
   fed_funds_rate?: number;
   treasury_10yr?: number;
   updated: string;
+}
+
+// Request for pre-parsed property data (from Electron local scraping)
+export interface ImportParsedRequest {
+  address: string;
+  city: string;
+  state: string;
+  zip_code: string;
+  list_price: number;
+  bedrooms?: number;
+  bathrooms?: number;
+  sqft?: number | null;
+  property_type?: string;
+  source: string;
+  source_url?: string;
+  down_payment_pct?: number;
+  interest_rate?: number;
 }
 
 class ApiClient {
@@ -294,6 +312,14 @@ class ApiClient {
   // Import
   async importFromUrl(params: ImportUrlRequest): Promise<ImportUrlResponse> {
     return this.fetch("/api/import/url", {
+      method: "POST",
+      body: JSON.stringify(params),
+    });
+  }
+
+  // Import pre-parsed property (from local Electron scraping)
+  async importParsed(params: ImportParsedRequest): Promise<ImportUrlResponse> {
+    return this.fetch("/api/import/parsed", {
       method: "POST",
       body: JSON.stringify(params),
     });

@@ -25,6 +25,7 @@ FRED_BASE_URL = "https://api.stlouisfed.org/fred"
 SERIES = {
     "mortgage_30yr": "MORTGAGE30US",
     "mortgage_15yr": "MORTGAGE15US",
+    "mortgage_5yr_arm": "MORTGAGE5US",
     "unemployment": "UNRATE",
     "cpi": "CPIAUCSL",
     "housing_starts": "HOUST",
@@ -185,6 +186,7 @@ class FredClient:
         mock_values = {
             "MORTGAGE30US": 6.95,
             "MORTGAGE15US": 6.25,
+            "MORTGAGE5US": 6.08,
             "UNRATE": 4.1,
             "CPIAUCSL": 314.5,
             "HOUST": 1420,
@@ -214,8 +216,18 @@ class FredClient:
 
     async def get_mortgage_rate(self, term: int = 30) -> Optional[float]:
         """Get current mortgage rate."""
-        series_id = SERIES["mortgage_30yr"] if term == 30 else SERIES["mortgage_15yr"]
+        if term == 30:
+            series_id = SERIES["mortgage_30yr"]
+        elif term == 15:
+            series_id = SERIES["mortgage_15yr"]
+        else:
+            series_id = SERIES["mortgage_5yr_arm"]
         series = await self._fetch_series(series_id, limit=1)
+        return series.latest_value if series else None
+
+    async def get_arm_rate(self) -> Optional[float]:
+        """Get current 5/1 ARM rate."""
+        series = await self._fetch_series(SERIES["mortgage_5yr_arm"], limit=1)
         return series.latest_value if series else None
 
     async def get_unemployment(self) -> Optional[float]:
@@ -247,6 +259,7 @@ class FredClient:
         """Get summary of key macro indicators."""
         mortgage_30 = await self.get_mortgage_rate(30)
         mortgage_15 = await self.get_mortgage_rate(15)
+        arm_5yr = await self.get_arm_rate()
         unemployment = await self.get_unemployment()
         fed_funds = await self.get_fed_funds_rate()
         treasury = await self.get_treasury_rate()
@@ -254,6 +267,7 @@ class FredClient:
         return {
             "mortgage_30yr": mortgage_30,
             "mortgage_15yr": mortgage_15,
+            "mortgage_5yr_arm": arm_5yr,
             "unemployment": unemployment,
             "fed_funds_rate": fed_funds,
             "treasury_10yr": treasury,

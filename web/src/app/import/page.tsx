@@ -16,6 +16,7 @@ import {
   MinusCircle,
   Zap,
   Database,
+  Monitor,
 } from "lucide-react";
 import { api, ImportUrlResponse, Deal, MacroDataResponse } from "@/lib/api";
 import {
@@ -26,6 +27,7 @@ import {
 } from "@/lib/utils";
 import { ScoreGauge } from "@/components/ScoreGauge";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
+import { isElectron, scrapePropertyLocally } from "@/lib/electron";
 
 export default function ImportPage() {
   const router = useRouter();
@@ -47,6 +49,14 @@ export default function ImportPage() {
 
   // Offer price adjustment state
   const [offerPrice, setOfferPrice] = useState<number | null>(null);
+
+  // Electron detection state
+  const [isElectronApp, setIsElectronApp] = useState(false);
+
+  // Check if running in Electron on mount
+  useEffect(() => {
+    setIsElectronApp(isElectron());
+  }, []);
 
   // Fetch current rates on load
   useEffect(() => {
@@ -79,22 +89,57 @@ export default function ImportPage() {
       setError(null);
       setResult(null);
       setOfferPrice(null);
-      setLoadingStep("Fetching property details...");
 
-      // Simulate progress steps
-      const stepTimer = setTimeout(() => setLoadingStep("Getting rent estimates..."), 2000);
-      const stepTimer2 = setTimeout(() => setLoadingStep("Analyzing market data..."), 4000);
-      const stepTimer3 = setTimeout(() => setLoadingStep("Calculating financials..."), 6000);
+      let response: ImportUrlResponse;
 
-      const response = await api.importFromUrl({
-        url: url.trim(),
-        down_payment_pct: parseFloat(downPaymentPct) / 100,
-        interest_rate: parseFloat(interestRate) / 100,
-      });
+      // If running in Electron, use local scraping
+      if (isElectronApp) {
+        setLoadingStep("Scraping property locally...");
 
-      clearTimeout(stepTimer);
-      clearTimeout(stepTimer2);
-      clearTimeout(stepTimer3);
+        // Scrape locally using Puppeteer
+        const scrapeResult = await scrapePropertyLocally(url.trim());
+
+        if (!scrapeResult || !scrapeResult.success || !scrapeResult.data) {
+          throw new Error(scrapeResult?.error || "Failed to scrape property locally");
+        }
+
+        setLoadingStep("Analyzing with API...");
+
+        // Send parsed data to API for analysis
+        response = await api.importParsed({
+          address: scrapeResult.data.address,
+          city: scrapeResult.data.city,
+          state: scrapeResult.data.state,
+          zip_code: scrapeResult.data.zip_code,
+          list_price: scrapeResult.data.list_price,
+          bedrooms: scrapeResult.data.bedrooms,
+          bathrooms: scrapeResult.data.bathrooms,
+          sqft: scrapeResult.data.sqft,
+          property_type: scrapeResult.data.property_type,
+          source: scrapeResult.data.source,
+          source_url: url.trim(),
+          down_payment_pct: parseFloat(downPaymentPct) / 100,
+          interest_rate: parseFloat(interestRate) / 100,
+        });
+      } else {
+        // Browser mode: use server-side scraping (may be blocked)
+        setLoadingStep("Fetching property details...");
+
+        // Simulate progress steps
+        const stepTimer = setTimeout(() => setLoadingStep("Getting rent estimates..."), 2000);
+        const stepTimer2 = setTimeout(() => setLoadingStep("Analyzing market data..."), 4000);
+        const stepTimer3 = setTimeout(() => setLoadingStep("Calculating financials..."), 6000);
+
+        response = await api.importFromUrl({
+          url: url.trim(),
+          down_payment_pct: parseFloat(downPaymentPct) / 100,
+          interest_rate: parseFloat(interestRate) / 100,
+        });
+
+        clearTimeout(stepTimer);
+        clearTimeout(stepTimer2);
+        clearTimeout(stepTimer3);
+      }
 
       setResult(response);
       if (response.deal?.property.list_price) {
@@ -260,19 +305,6 @@ export default function ImportPage() {
                 </div>
               </div>
 
-              {/* Current Rate Info */}
-              {macroData && (
-                <div className="bg-blue-50 rounded-lg p-3 text-sm">
-                  <div className="flex items-center gap-2 text-blue-700 font-medium mb-1">
-                    <Database className="h-4 w-4" />
-                    Live Market Rates (FRED)
-                  </div>
-                  <div className="text-blue-600 text-xs">
-                    30yr: {macroData.mortgage_30yr?.toFixed(2)}% | 15yr: {macroData.mortgage_15yr?.toFixed(2)}% | Fed: {macroData.fed_funds_rate?.toFixed(2)}%
-                  </div>
-                </div>
-              )}
-
               <button
                 type="submit"
                 disabled={loading || !url.trim()}
@@ -290,6 +322,19 @@ export default function ImportPage() {
                   </>
                 )}
               </button>
+
+              {/* Mode indicator */}
+              <div className={cn(
+                "mt-3 p-2 rounded-lg text-xs flex items-center gap-2",
+                isElectronApp ? "bg-green-50 text-green-700" : "bg-gray-50 text-gray-600"
+              )}>
+                <Monitor className="h-3 w-3" />
+                {isElectronApp ? (
+                  <span>Desktop App - Local scraping enabled</span>
+                ) : (
+                  <span>Browser Mode - Server-side scraping</span>
+                )}
+              </div>
             </div>
           </form>
 
