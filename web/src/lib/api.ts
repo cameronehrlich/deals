@@ -2,7 +2,8 @@
  * API client for Real Estate Deal Platform
  */
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://deals-api-swart.vercel.app";
+// Use relative URL - Next.js rewrites will proxy to the actual API
+const API_URL = "";
 
 export interface Market {
   id: string;
