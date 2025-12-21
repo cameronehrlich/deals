@@ -59,15 +59,16 @@ deals/
 ├── api/                 # FastAPI REST API
 │   ├── main.py         # API entry point
 │   ├── models.py       # Response models
-│   └── routes/         # API endpoints
+│   └── routes/         # API endpoints (markets, deals, analysis, import)
 ├── web/                 # Next.js frontend
-│   ├── src/app/        # Pages (dashboard, markets, deals, calculator)
+│   ├── src/app/        # Pages (dashboard, markets, deals, import, calculator)
 │   ├── src/components/ # React components
 │   └── src/lib/        # API client, utilities
 ├── src/                 # Core Python modules
 │   ├── models/         # Data models (Property, Financials, Market, Deal)
 │   ├── agents/         # Agent layer (MarketResearch, DealAnalyzer, Pipeline)
 │   ├── scrapers/       # Property data scrapers
+│   ├── data_sources/   # External data integrations (Redfin, FRED, HUD, RentCast)
 │   ├── analysis/       # Ranking and sensitivity analysis
 │   ├── db/             # Database repository layer
 │   └── cli.py          # Command-line interface
@@ -89,6 +90,7 @@ deals/
 | Market Detail | `/markets/[id]` | Deep dive into a specific market |
 | Find Deals | `/deals` | Search and filter properties |
 | Deal Detail | `/deals/[id]` | Full deal analysis with financials |
+| Import | `/import` | Import properties from Zillow/Redfin/Realtor URLs |
 | Calculator | `/calculator` | Analyze any property with stress testing |
 
 ### API Endpoints
@@ -100,6 +102,10 @@ deals/
 | GET | `/api/deals/search` | Search deals with filters |
 | GET | `/api/deals/{id}` | Get deal details |
 | POST | `/api/analysis/calculate` | Calculate financials for any property |
+| POST | `/api/import/url` | Import property from Zillow/Redfin/Realtor URL |
+| POST | `/api/import/rent-estimate` | Get rent estimate for an address |
+| GET | `/api/import/macro` | Get current mortgage rates and macro data |
+| GET | `/api/import/market-data/{city}/{state}` | Get enriched market data |
 | GET | `/api/health` | Health check |
 
 ## CLI Usage
@@ -200,23 +206,24 @@ pytest tests/ -v
 pytest tests/ --cov=src --cov-report=html
 ```
 
-## Future Data Sources (Planned)
+## Data Sources
 
-| Source | Purpose | Cost |
-|--------|---------|------|
-| Redfin Data Center | Market metrics | Free |
-| FRED | Macro data (rates, etc.) | Free |
-| BLS | Employment data | Free |
-| Census/ACS | Demographics | Free |
-| RentCast | Rent estimates | Free tier (50/mo) |
-| URL Parser | Import from Zillow/Redfin links | Free |
+| Source | Purpose | Status |
+|--------|---------|--------|
+| Redfin Data Center | Market metrics (prices, inventory, DOM) | Implemented |
+| FRED | Macro data (mortgage rates, unemployment) | Implemented |
+| HUD Fair Market Rents | Rent baselines for 8 target markets | Implemented |
+| RentCast | Property-specific rent estimates | Implemented (with HUD fallback) |
+| URL Parser | Import from Zillow/Redfin/Realtor URLs | Implemented |
+| BLS | Employment data | Planned |
+| Census/ACS | Demographics | Planned |
 
 ## Roadmap
 
 - [x] Phase 1: Foundation (CLI, models, agents)
 - [x] Phase 1.5: Web Application (FastAPI + Next.js)
-- [ ] Phase 2: Real Data Sources (Redfin DC, FRED, RentCast)
-- [ ] Phase 2.5: URL-to-Deal Import
+- [x] Phase 2: Real Data Sources (Redfin DC, FRED, HUD FMR, RentCast)
+- [x] Phase 2.5: URL-to-Deal Import (Zillow, Redfin, Realtor.com)
 - [ ] Phase 3: Alerting & Monitoring
 - [ ] Phase 4: PostgreSQL Persistence
 
