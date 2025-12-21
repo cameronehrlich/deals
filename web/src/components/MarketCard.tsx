@@ -44,13 +44,13 @@ export function MarketCard({ market, rank }: MarketCardProps) {
               <div>
                 <p className="text-xs text-gray-500">Median Price</p>
                 <p className="font-semibold">
-                  {formatCurrency(market.median_home_price)}
+                  {market.median_home_price ? formatCurrency(market.median_home_price) : "N/A"}
                 </p>
               </div>
               <div>
                 <p className="text-xs text-gray-500">Median Rent</p>
                 <p className="font-semibold">
-                  {formatCurrency(market.median_rent)}
+                  {market.median_rent ? formatCurrency(market.median_rent) : "N/A"}
                 </p>
               </div>
               <div>

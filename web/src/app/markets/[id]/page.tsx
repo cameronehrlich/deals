@@ -147,7 +147,7 @@ export default function MarketDetailPage() {
                 <DollarSign className="h-4 w-4" />
                 Median Income
               </span>
-              <span className="font-semibold">{formatCurrency(market.median_household_income)}</span>
+              <span className="font-semibold">{market.median_household_income ? formatCurrency(market.median_household_income) : "N/A"}</span>
             </div>
           </div>
         </div>
@@ -202,7 +202,7 @@ export default function MarketDetailPage() {
                 <Home className="h-4 w-4" />
                 Median Price
               </span>
-              <span className="font-semibold">{formatCurrency(market.median_home_price)}</span>
+              <span className="font-semibold">{market.median_home_price ? formatCurrency(market.median_home_price) : "N/A"}</span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-gray-600">Price Change (1Y)</span>
@@ -247,7 +247,7 @@ export default function MarketDetailPage() {
                 <Building className="h-4 w-4" />
                 Median Rent
               </span>
-              <span className="font-semibold">{formatCurrency(market.median_rent)}/mo</span>
+              <span className="font-semibold">{market.median_rent ? formatCurrency(market.median_rent) : "N/A"}/mo</span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-gray-600">Rent Change (1Y)</span>
