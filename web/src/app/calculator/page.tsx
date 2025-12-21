@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Calculator,
   DollarSign,
@@ -10,8 +10,9 @@ import {
   CheckCircle,
   XCircle,
   RefreshCw,
+  Zap,
 } from "lucide-react";
-import { api, AnalysisResult } from "@/lib/api";
+import { api, AnalysisResult, MacroDataResponse } from "@/lib/api";
 import {
   formatCurrency,
   formatPercent,
@@ -39,6 +40,27 @@ export default function CalculatorPage() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [macroData, setMacroData] = useState<MacroDataResponse | null>(null);
+  const [loadingRates, setLoadingRates] = useState(true);
+
+  // Fetch current market rates on load
+  useEffect(() => {
+    async function fetchRates() {
+      try {
+        const data = await api.getMacroData();
+        setMacroData(data);
+        // Auto-fill with current rate
+        if (data.mortgage_30yr) {
+          setInterestRate(data.mortgage_30yr.toFixed(2));
+        }
+      } catch (err) {
+        console.error("Failed to fetch rates:", err);
+      } finally {
+        setLoadingRates(false);
+      }
+    }
+    fetchRates();
+  }, []);
 
   const calculate = async () => {
     try {
@@ -147,7 +169,21 @@ export default function CalculatorPage() {
               </div>
 
               <div>
-                <label className="label">Interest Rate (%)</label>
+                <label className="label flex items-center justify-between">
+                  <span>Interest Rate (%)</span>
+                  {loadingRates ? (
+                    <span className="text-xs text-gray-400">Loading rates...</span>
+                  ) : macroData?.mortgage_30yr ? (
+                    <button
+                      type="button"
+                      onClick={() => setInterestRate(macroData.mortgage_30yr!.toFixed(2))}
+                      className="text-xs text-primary-600 hover:text-primary-700 flex items-center gap-1"
+                    >
+                      <Zap className="h-3 w-3" />
+                      Use current ({macroData.mortgage_30yr.toFixed(2)}%)
+                    </button>
+                  ) : null}
+                </label>
                 <input
                   type="number"
                   value={interestRate}
@@ -157,6 +193,11 @@ export default function CalculatorPage() {
                   max="20"
                   step="0.25"
                 />
+                {macroData && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    Current 30yr: {macroData.mortgage_30yr?.toFixed(2)}% | 15yr: {macroData.mortgage_15yr?.toFixed(2)}%
+                  </p>
+                )}
               </div>
             </div>
           </div>

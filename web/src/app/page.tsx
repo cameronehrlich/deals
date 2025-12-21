@@ -9,17 +9,21 @@ import {
   Building,
   ArrowRight,
   Search,
+  Percent,
+  Briefcase,
+  Activity,
 } from "lucide-react";
-import { api, Market, Deal } from "@/lib/api";
+import { api, Market, Deal, MacroDataResponse } from "@/lib/api";
 import { formatCurrency, formatPercent } from "@/lib/utils";
 import { StatCard } from "@/components/StatCard";
 import { MarketCard } from "@/components/MarketCard";
 import { DealCard } from "@/components/DealCard";
-import { LoadingPage } from "@/components/LoadingSpinner";
+import { LoadingPage, LoadingSpinner } from "@/components/LoadingSpinner";
 
 export default function DashboardPage() {
   const [markets, setMarkets] = useState<Market[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
+  const [macroData, setMacroData] = useState<MacroDataResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,12 +31,14 @@ export default function DashboardPage() {
     async function fetchData() {
       try {
         setLoading(true);
-        const [marketsRes, dealsRes] = await Promise.all([
+        const [marketsRes, dealsRes, macroRes] = await Promise.all([
           api.getMarkets({ sort_by: "overall", limit: 5 }),
           api.searchDeals({ limit: 5 }),
+          api.getMacroData().catch(() => null),
         ]);
         setMarkets(marketsRes.markets);
         setDeals(dealsRes.deals);
+        setMacroData(macroRes);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load data");
       } finally {
@@ -66,7 +72,7 @@ export default function DashboardPage() {
   const topMarket = markets[0];
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 animate-fade-in">
       {/* Header */}
       <div>
         <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
@@ -102,6 +108,65 @@ export default function DashboardPage() {
           icon={Building}
         />
       </div>
+
+      {/* Market Conditions - Live FRED Data */}
+      {macroData && (
+        <div className="card">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-gray-900">Current Market Conditions</h2>
+            <span className="text-xs text-gray-500">
+              Live data from Federal Reserve
+            </span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <div className="text-center p-3 bg-blue-50 rounded-lg">
+              <div className="flex items-center justify-center gap-1 text-blue-600 mb-1">
+                <Percent className="h-4 w-4" />
+                <span className="text-xs font-medium">30yr Mortgage</span>
+              </div>
+              <p className="text-2xl font-bold text-gray-900">
+                {macroData.mortgage_30yr?.toFixed(2)}%
+              </p>
+            </div>
+            <div className="text-center p-3 bg-green-50 rounded-lg">
+              <div className="flex items-center justify-center gap-1 text-green-600 mb-1">
+                <Percent className="h-4 w-4" />
+                <span className="text-xs font-medium">15yr Mortgage</span>
+              </div>
+              <p className="text-2xl font-bold text-gray-900">
+                {macroData.mortgage_15yr?.toFixed(2)}%
+              </p>
+            </div>
+            <div className="text-center p-3 bg-purple-50 rounded-lg">
+              <div className="flex items-center justify-center gap-1 text-purple-600 mb-1">
+                <Activity className="h-4 w-4" />
+                <span className="text-xs font-medium">Fed Funds Rate</span>
+              </div>
+              <p className="text-2xl font-bold text-gray-900">
+                {macroData.fed_funds_rate?.toFixed(2)}%
+              </p>
+            </div>
+            <div className="text-center p-3 bg-orange-50 rounded-lg">
+              <div className="flex items-center justify-center gap-1 text-orange-600 mb-1">
+                <TrendingUp className="h-4 w-4" />
+                <span className="text-xs font-medium">10yr Treasury</span>
+              </div>
+              <p className="text-2xl font-bold text-gray-900">
+                {macroData.treasury_10yr?.toFixed(2)}%
+              </p>
+            </div>
+            <div className="text-center p-3 bg-red-50 rounded-lg">
+              <div className="flex items-center justify-center gap-1 text-red-600 mb-1">
+                <Briefcase className="h-4 w-4" />
+                <span className="text-xs font-medium">Unemployment</span>
+              </div>
+              <p className="text-2xl font-bold text-gray-900">
+                {macroData.unemployment?.toFixed(1)}%
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Quick Actions */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

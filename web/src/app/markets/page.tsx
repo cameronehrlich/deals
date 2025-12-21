@@ -84,17 +84,15 @@ export default function MarketsPage() {
           <p className="text-red-600">{error}</p>
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-4 animate-fade-in">
           <p className="text-sm text-gray-500">
             {markets.length} markets found
           </p>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {markets.map((market, index) => (
-              <MarketCard
-                key={market.id}
-                market={market}
-                rank={index + 1}
-              />
+              <div key={market.id} className="animate-slide-up" style={{ animationDelay: `${index * 50}ms` }}>
+                <MarketCard market={market} rank={index + 1} />
+              </div>
             ))}
           </div>
         </div>

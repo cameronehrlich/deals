@@ -2,8 +2,8 @@
 
 import { Suspense, useEffect, useState, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
-import { Search, SlidersHorizontal } from "lucide-react";
-import { api, Deal, Market } from "@/lib/api";
+import { Search, SlidersHorizontal, Zap, Database, TrendingUp, Building } from "lucide-react";
+import { api, Deal, Market, MacroDataResponse } from "@/lib/api";
 import { DealCard } from "@/components/DealCard";
 import { LoadingPage, LoadingSpinner } from "@/components/LoadingSpinner";
 
@@ -22,6 +22,8 @@ function DealsContent() {
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [macroData, setMacroData] = useState<MacroDataResponse | null>(null);
+  const [loadingRates, setLoadingRates] = useState(true);
 
   // Filters
   const [selectedMarkets, setSelectedMarkets] = useState(initialMarket);
@@ -33,9 +35,25 @@ function DealsContent() {
   const [interestRate, setInterestRate] = useState("7");
   const [showFilters, setShowFilters] = useState(false);
 
-  // Fetch markets for dropdown
+  // Fetch markets for dropdown and current rates
   useEffect(() => {
     api.getMarkets({ limit: 20 }).then((res) => setMarkets(res.markets));
+
+    // Fetch current rates
+    async function fetchRates() {
+      try {
+        const data = await api.getMacroData();
+        setMacroData(data);
+        if (data.mortgage_30yr) {
+          setInterestRate(data.mortgage_30yr.toFixed(2));
+        }
+      } catch (err) {
+        console.error("Failed to fetch rates:", err);
+      } finally {
+        setLoadingRates(false);
+      }
+    }
+    fetchRates();
   }, []);
 
   const searchDeals = useCallback(async () => {
@@ -194,7 +212,21 @@ function DealsContent() {
               </div>
 
               <div>
-                <label className="label">Interest Rate (%)</label>
+                <label className="label flex items-center justify-between">
+                  <span>Interest Rate (%)</span>
+                  {loadingRates ? (
+                    <LoadingSpinner size="sm" />
+                  ) : macroData?.mortgage_30yr ? (
+                    <button
+                      type="button"
+                      onClick={() => setInterestRate(macroData.mortgage_30yr!.toFixed(2))}
+                      className="text-xs text-primary-600 hover:text-primary-700 flex items-center gap-1"
+                    >
+                      <Zap className="h-3 w-3" />
+                      Current
+                    </button>
+                  ) : null}
+                </label>
                 <input
                   type="number"
                   value={interestRate}
@@ -206,6 +238,21 @@ function DealsContent() {
                 />
               </div>
             </div>
+
+            {/* Current Rate Info */}
+            {macroData && (
+              <div className="mt-4 pt-4 border-t border-gray-200">
+                <div className="flex items-center gap-2 text-sm text-gray-600">
+                  <Database className="h-4 w-4 text-blue-500" />
+                  <span>Live FRED data:</span>
+                  <span className="font-medium">30yr: {macroData.mortgage_30yr?.toFixed(2)}%</span>
+                  <span className="text-gray-400">|</span>
+                  <span className="font-medium">15yr: {macroData.mortgage_15yr?.toFixed(2)}%</span>
+                  <span className="text-gray-400">|</span>
+                  <span className="font-medium">Fed: {macroData.fed_funds_rate?.toFixed(2)}%</span>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -221,20 +268,34 @@ function DealsContent() {
           </button>
         </div>
       ) : deals.length === 0 ? (
-        <div className="card text-center py-12">
-          <p className="text-gray-500">No deals found matching your criteria</p>
-          <p className="text-sm text-gray-400 mt-2">
-            Try adjusting your filters or selecting different markets
+        <div className="card text-center py-12 animate-fade-in">
+          <Building className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+          <h3 className="text-lg font-medium text-gray-900">No deals found</h3>
+          <p className="text-gray-500 mt-1 max-w-md mx-auto">
+            No properties match your current criteria. Try adjusting your filters or selecting different markets.
           </p>
+          <button onClick={searchDeals} className="btn-primary mt-4">
+            <Search className="h-4 w-4 inline mr-2" />
+            Try Again
+          </button>
         </div>
       ) : (
-        <div className="space-y-4">
-          <p className="text-sm text-gray-500">
-            {deals.length} deals found
-          </p>
+        <div className="space-y-4 animate-fade-in">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-gray-500">
+              {deals.length} deals found
+            </p>
+            {macroData && (
+              <p className="text-xs text-gray-400">
+                Using {macroData.mortgage_30yr?.toFixed(2)}% mortgage rate
+              </p>
+            )}
+          </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {deals.map((deal) => (
-              <DealCard key={deal.id} deal={deal} />
+            {deals.map((deal, index) => (
+              <div key={deal.id} className="animate-slide-up" style={{ animationDelay: `${index * 50}ms` }}>
+                <DealCard deal={deal} />
+              </div>
             ))}
           </div>
         </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
   Link2,
@@ -14,8 +14,10 @@ import {
   MapPin,
   Info,
   MinusCircle,
+  Zap,
+  Database,
 } from "lucide-react";
-import { api, ImportUrlResponse, Deal } from "@/lib/api";
+import { api, ImportUrlResponse, Deal, MacroDataResponse } from "@/lib/api";
 import {
   formatCurrency,
   formatPercent,
@@ -36,10 +38,33 @@ export default function ImportPage() {
   // Results state
   const [result, setResult] = useState<ImportUrlResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadingStep, setLoadingStep] = useState("");
   const [error, setError] = useState<string | null>(null);
+
+  // Macro data state
+  const [macroData, setMacroData] = useState<MacroDataResponse | null>(null);
+  const [loadingRates, setLoadingRates] = useState(true);
 
   // Offer price adjustment state
   const [offerPrice, setOfferPrice] = useState<number | null>(null);
+
+  // Fetch current rates on load
+  useEffect(() => {
+    async function fetchRates() {
+      try {
+        const data = await api.getMacroData();
+        setMacroData(data);
+        if (data.mortgage_30yr) {
+          setInterestRate(data.mortgage_30yr.toFixed(2));
+        }
+      } catch (err) {
+        console.error("Failed to fetch rates:", err);
+      } finally {
+        setLoadingRates(false);
+      }
+    }
+    fetchRates();
+  }, []);
 
   const handleImport = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -54,6 +79,12 @@ export default function ImportPage() {
       setError(null);
       setResult(null);
       setOfferPrice(null);
+      setLoadingStep("Fetching property details...");
+
+      // Simulate progress steps
+      const stepTimer = setTimeout(() => setLoadingStep("Getting rent estimates..."), 2000);
+      const stepTimer2 = setTimeout(() => setLoadingStep("Analyzing market data..."), 4000);
+      const stepTimer3 = setTimeout(() => setLoadingStep("Calculating financials..."), 6000);
 
       const response = await api.importFromUrl({
         url: url.trim(),
@@ -61,14 +92,19 @@ export default function ImportPage() {
         interest_rate: parseFloat(interestRate) / 100,
       });
 
+      clearTimeout(stepTimer);
+      clearTimeout(stepTimer2);
+      clearTimeout(stepTimer3);
+
       setResult(response);
       if (response.deal?.property.list_price) {
         setOfferPrice(response.deal.property.list_price);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Import failed");
+      setError(err instanceof Error ? err.message : "Import failed. Try using the Calculator for manual entry.");
     } finally {
       setLoading(false);
+      setLoadingStep("");
     }
   };
 
@@ -197,7 +233,21 @@ export default function ImportPage() {
                   />
                 </div>
                 <div>
-                  <label className="label">Interest Rate (%)</label>
+                  <label className="label flex items-center justify-between">
+                    <span>Interest Rate (%)</span>
+                    {loadingRates ? (
+                      <LoadingSpinner size="sm" />
+                    ) : macroData?.mortgage_30yr ? (
+                      <button
+                        type="button"
+                        onClick={() => setInterestRate(macroData.mortgage_30yr!.toFixed(2))}
+                        className="text-xs text-primary-600 hover:text-primary-700 flex items-center gap-1"
+                      >
+                        <Zap className="h-3 w-3" />
+                        Current
+                      </button>
+                    ) : null}
+                  </label>
                   <input
                     type="number"
                     value={interestRate}
@@ -209,6 +259,19 @@ export default function ImportPage() {
                   />
                 </div>
               </div>
+
+              {/* Current Rate Info */}
+              {macroData && (
+                <div className="bg-blue-50 rounded-lg p-3 text-sm">
+                  <div className="flex items-center gap-2 text-blue-700 font-medium mb-1">
+                    <Database className="h-4 w-4" />
+                    Live Market Rates (FRED)
+                  </div>
+                  <div className="text-blue-600 text-xs">
+                    30yr: {macroData.mortgage_30yr?.toFixed(2)}% | 15yr: {macroData.mortgage_15yr?.toFixed(2)}% | Fed: {macroData.fed_funds_rate?.toFixed(2)}%
+                  </div>
+                </div>
+              )}
 
               <button
                 type="submit"
@@ -283,12 +346,23 @@ export default function ImportPage() {
 
         {/* Results */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Error */}
+          {/* Error with Manual Entry Option */}
           {error && (
             <div className="card border-red-200 bg-red-50">
-              <div className="flex items-center gap-3">
-                <AlertTriangle className="h-5 w-5 text-red-600" />
-                <p className="text-red-700">{error}</p>
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="h-5 w-5 text-red-600 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-red-700 font-medium">{error}</p>
+                  <p className="text-red-600 text-sm mt-2">
+                    Listing sites often block automated requests. Try the Calculator for manual entry instead.
+                  </p>
+                  <button
+                    onClick={() => router.push('/calculator')}
+                    className="btn-primary mt-3"
+                  >
+                    Open Calculator
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -584,8 +658,38 @@ export default function ImportPage() {
                 Importing property...
               </h3>
               <p className="text-gray-500 mt-1">
-                Fetching property data and enriching with market insights
+                {loadingStep || "Fetching property data and enriching with market insights"}
               </p>
+              <div className="mt-6 max-w-xs mx-auto">
+                <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
+                  <div className={cn(
+                    "w-2 h-2 rounded-full",
+                    loadingStep.includes("property") ? "bg-blue-500 animate-pulse" : "bg-gray-300"
+                  )} />
+                  <span>Property details</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
+                  <div className={cn(
+                    "w-2 h-2 rounded-full",
+                    loadingStep.includes("rent") ? "bg-blue-500 animate-pulse" : "bg-gray-300"
+                  )} />
+                  <span>Rent estimates (RentCast)</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
+                  <div className={cn(
+                    "w-2 h-2 rounded-full",
+                    loadingStep.includes("market") ? "bg-blue-500 animate-pulse" : "bg-gray-300"
+                  )} />
+                  <span>Market analysis</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm text-gray-500">
+                  <div className={cn(
+                    "w-2 h-2 rounded-full",
+                    loadingStep.includes("financials") ? "bg-blue-500 animate-pulse" : "bg-gray-300"
+                  )} />
+                  <span>Financial calculations</span>
+                </div>
+              </div>
             </div>
           )}
         </div>
