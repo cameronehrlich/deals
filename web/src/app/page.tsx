@@ -50,8 +50,7 @@ export default function DashboardPage() {
       <div className="text-center py-12">
         <p className="text-red-600 mb-4">{error}</p>
         <p className="text-gray-500">
-          Make sure the API server is running at{" "}
-          <code className="bg-gray-100 px-2 py-1 rounded">localhost:8000</code>
+          Unable to connect to the API server. Please try again later.
         </p>
       </div>
     );
