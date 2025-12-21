@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routes import markets, deals, analysis
+from api.routes import markets, deals, analysis, import_property
 from api.models import HealthResponse
 
 
@@ -45,6 +45,7 @@ app.add_middleware(
 app.include_router(markets.router, prefix="/api/markets", tags=["Markets"])
 app.include_router(deals.router, prefix="/api/deals", tags=["Deals"])
 app.include_router(analysis.router, prefix="/api/analysis", tags=["Analysis"])
+app.include_router(import_property.router, prefix="/api/import", tags=["Import"])
 
 
 @app.get("/", response_model=HealthResponse)

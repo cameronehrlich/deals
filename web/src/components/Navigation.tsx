@@ -8,7 +8,8 @@ import {
   Search,
   Calculator,
   TrendingUp,
-  Building2
+  Building2,
+  Link2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -16,6 +17,7 @@ const navigation = [
   { name: "Dashboard", href: "/", icon: Home },
   { name: "Markets", href: "/markets", icon: MapPin },
   { name: "Find Deals", href: "/deals", icon: Search },
+  { name: "Import", href: "/import", icon: Link2 },
   { name: "Calculator", href: "/calculator", icon: Calculator },
 ];
 
