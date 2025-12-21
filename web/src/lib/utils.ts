@@ -65,6 +65,15 @@ export function getRiskBadge(risk: string): string {
 }
 
 /**
+ * Get score badge styling based on numeric score
+ */
+export function getScoreBadge(score: number): string {
+  if (score >= 70) return "badge-green";
+  if (score >= 50) return "badge-yellow";
+  return "badge-red";
+}
+
+/**
  * Format a number with commas
  */
 export function formatNumber(value: number): string {
