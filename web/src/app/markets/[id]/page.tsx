@@ -125,7 +125,7 @@ export default function MarketDetailPage() {
                 <Users className="h-4 w-4" />
                 Population
               </span>
-              <span className="font-semibold">{formatNumber(market.population)}</span>
+              <span className="font-semibold">{market.population ? formatNumber(market.population) : "N/A"}</span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-gray-600">1Y Growth</span>
