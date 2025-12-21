@@ -8,6 +8,9 @@ const inter = Inter({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: "Real Estate Deal Platform",
   description: "Source, analyze, and rank real estate investment opportunities",
+  icons: {
+    icon: "/favicon.svg",
+  },
 };
 
 export default function RootLayout({
