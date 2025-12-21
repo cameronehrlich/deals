@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "WebFetch(domain:deals-tau-seven.vercel.app)",
-      "WebFetch(domain:deals-api-swart.vercel.app)"
+      "WebFetch(domain:deals-api-swart.vercel.app)",
+      "Bash(curl:*)",
+      "Bash(python3:*)"
     ]
   }
 }

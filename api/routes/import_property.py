@@ -211,7 +211,7 @@ async def import_parsed_property(request: ImportParsedRequest):
     from src.models.property import Property, PropertyType, PropertyStatus
     from src.models.deal import Deal, DealPipeline
     from src.models.financials import Financials, LoanTerms
-    from src.agents.deal_analyzer import DealAnalyzer
+    from src.agents.deal_analyzer import DealAnalyzerAgent
 
     aggregator = DataAggregator()
     warnings = []
@@ -268,33 +268,33 @@ async def import_parsed_property(request: ImportParsedRequest):
             warnings.append("Could not estimate rent. Using market average.")
 
         # Get market data
-        market = await aggregator.get_market(request.city, request.state)
+        market_data = await aggregator.get_market_data(request.city, request.state)
+        market = market_data.to_market() if market_data else None
         if not market:
             warnings.append("Market data not available for this location.")
 
-        # Calculate financials
-        loan = LoanTerms(
-            down_payment_pct=request.down_payment_pct,
-            interest_rate=request.interest_rate,
-        )
-        financials = Financials.calculate(
-            purchase_price=request.list_price,
-            monthly_rent=property.estimated_rent or 0,
-            loan=loan,
-        )
-
-        # Create deal
+        # Create deal (financials will be created during analyze())
         deal = Deal(
+            id=f"imported_{prop_id}",
             property=property,
-            financials=financials,
             market=market,
-            pipeline_status=DealPipeline.ANALYZED,
+            pipeline_status=DealPipeline.NEW,
             first_seen=datetime.now(),
         )
 
-        # Analyze and score
-        analyzer = DealAnalyzer()
-        deal = analyzer.analyze_deal(deal)
+        # Set loan terms before analysis
+        deal.financials = Financials(
+            property_id=property.id,
+            purchase_price=request.list_price,
+            estimated_rent=property.estimated_rent or 0,
+            loan=LoanTerms(
+                down_payment_pct=request.down_payment_pct,
+                interest_rate=request.interest_rate,
+            ),
+        )
+
+        # Run analysis (calculates financials and scores)
+        deal.analyze()
 
         # Build market detail if available
         market_detail = None
