@@ -9,130 +9,183 @@ An automated, agent-driven system to source, analyze, and rank residential real 
 - **Sensitivity Analysis**: Stress tests deals against interest rate changes, vacancy increases, and rent decreases
 - **Ranking Engine**: Scores and ranks deals based on configurable weights for financial returns, market quality, and risk
 - **Multiple Strategies**: Supports cash flow, appreciation, value-add, and distressed investment strategies
+- **Web Dashboard**: Modern Next.js frontend with interactive deal search and analysis tools
+- **REST API**: FastAPI backend for programmatic access
 
 ## Quick Start
 
-### Installation
+### Option 1: Docker (Recommended)
 
 ```bash
-# Clone the repository
-cd deals
+# Build and run both API and web frontend
+docker compose up --build
 
+# API available at http://localhost:8000
+# Web app available at http://localhost:3000
+```
+
+### Option 2: Local Development
+
+```bash
+# Install all dependencies
+make install
+
+# Run both API and web in development mode
+make dev
+
+# Or run separately:
+make api  # API on http://localhost:8000
+make web  # Web on http://localhost:3000
+```
+
+### Option 3: CLI Only
+
+```bash
 # Create virtual environment
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate
 
 # Install dependencies
 pip install -e .
-```
 
-### Usage
-
-#### Search for Deals
-
-```bash
-# Search across top markets
-python -m src.cli search
-
-# Search specific markets
-python -m src.cli search --markets indianapolis_in,cleveland_oh
-
-# With filters
-python -m src.cli search --max-price 300000 --min-beds 3 --top 10
-
-# With custom financing
-python -m src.cli search --down-payment 0.20 --rate 0.065
-```
-
-#### Analyze Markets
-
-```bash
-# List and rank all markets
-python -m src.cli markets
-
-# Top 5 markets for cash flow
-python -m src.cli markets --top 5 --strategy cash_flow
-
-# Top markets for growth
-python -m src.cli markets --strategy growth
-```
-
-#### Analyze a Specific Market
-
-```bash
-python -m src.cli analyze Indianapolis IN --max-price 250000 --limit 30
-```
-
-#### Run Stress Tests
-
-```bash
-# Stress test a hypothetical deal
-python -m src.cli stress-test 200000 1800 --down 0.25 --rate 0.07
+# Run CLI
+python -m src.cli search --markets indianapolis_in
 ```
 
 ## Project Structure
 
 ```
 deals/
-├── src/
-│   ├── models/          # Data models (Property, Financials, Market, Deal)
-│   ├── agents/          # Agent layer (MarketResearch, DealAnalyzer, Pipeline)
-│   ├── scrapers/        # Property data scrapers
-│   ├── analysis/        # Ranking and sensitivity analysis
-│   ├── db/              # Database repository layer
-│   ├── utils/           # Utility functions
-│   └── cli.py           # Command-line interface
-├── config/
-│   ├── strategies.yaml  # Investment strategy definitions
-│   └── markets.yaml     # Target market configuration
-├── tests/               # Test suite
-└── data/                # Data storage
+├── api/                 # FastAPI REST API
+│   ├── main.py         # API entry point
+│   ├── models.py       # Response models
+│   └── routes/         # API endpoints
+├── web/                 # Next.js frontend
+│   ├── src/app/        # Pages (dashboard, markets, deals, calculator)
+│   ├── src/components/ # React components
+│   └── src/lib/        # API client, utilities
+├── src/                 # Core Python modules
+│   ├── models/         # Data models (Property, Financials, Market, Deal)
+│   ├── agents/         # Agent layer (MarketResearch, DealAnalyzer, Pipeline)
+│   ├── scrapers/       # Property data scrapers
+│   ├── analysis/       # Ranking and sensitivity analysis
+│   ├── db/             # Database repository layer
+│   └── cli.py          # Command-line interface
+├── config/             # Strategy and market configs
+├── tests/              # Test suite
+├── Dockerfile          # API Docker image
+├── docker-compose.yml  # Full stack deployment
+└── fly.toml            # Fly.io deployment config
+```
+
+## Web Application
+
+### Pages
+
+| Page | URL | Description |
+|------|-----|-------------|
+| Dashboard | `/` | Overview with top markets and deals |
+| Markets | `/markets` | List and rank investment markets |
+| Market Detail | `/markets/[id]` | Deep dive into a specific market |
+| Find Deals | `/deals` | Search and filter properties |
+| Deal Detail | `/deals/[id]` | Full deal analysis with financials |
+| Calculator | `/calculator` | Analyze any property with stress testing |
+
+### API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/markets` | List markets with sorting/filtering |
+| GET | `/api/markets/{id}` | Get market details |
+| GET | `/api/deals/search` | Search deals with filters |
+| GET | `/api/deals/{id}` | Get deal details |
+| POST | `/api/analysis/calculate` | Calculate financials for any property |
+| GET | `/api/health` | Health check |
+
+## CLI Usage
+
+```bash
+# Search for deals across markets
+python -m src.cli search --markets indianapolis_in,cleveland_oh --max-price 300000
+
+# List and rank markets
+python -m src.cli markets --top 5 --strategy cash_flow
+
+# Analyze a specific market
+python -m src.cli analyze Indianapolis IN --limit 30
+
+# Stress test a hypothetical deal
+python -m src.cli stress-test 200000 1800 --down 0.25 --rate 0.07
 ```
 
 ## Investment Strategies
 
-### Cash Flow (Default)
-- Focus on immediate positive cash flow
-- Minimum 8% cash-on-cash return
-- Minimum $200/month cash flow
-- Emphasis on rent-to-price ratio
-
-### Appreciation
-- Accept lower cash flow for growth markets
-- Target 5% annual appreciation
-- Focus on population and job growth
-
-### Value-Add / BRRRR
-- Properties with renovation potential
-- Target 25% below ARV
-- Longer days on market, price reductions
-
-### Distressed
-- Foreclosures, auctions, REO
-- Minimum 30% discount to market
-- Higher risk tolerance
+| Strategy | Min CoC | Focus |
+|----------|---------|-------|
+| **Cash Flow** | 8% | Immediate positive cash flow, rent-to-price ratio |
+| **Appreciation** | 2% | Growth markets, population & job growth |
+| **Value-Add** | 10%+ | Renovation potential, forced appreciation |
+| **Distressed** | 12%+ | Foreclosures, auctions, 30%+ discount |
 
 ## Financial Modeling
 
-Default assumptions (configurable):
-- Down payment: 25%
-- Interest rate: 7%
-- Loan term: 30 years
-- Closing costs: 3%
-- Property tax rate: 1.2%
-- Insurance: 0.5% of value
-- Vacancy: 8%
-- Maintenance: 1% of value
-- Property management: 10% of rent
-- CapEx reserve: 1% of value
+Default assumptions (all configurable):
 
-## Target Markets (Tier 1)
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| Down Payment | 25% | Conventional loan |
+| Interest Rate | 7% | Current market rate |
+| Loan Term | 30 years | Standard mortgage |
+| Closing Costs | 3% | Of purchase price |
+| Property Tax | 1.2% | Annual rate |
+| Insurance | 0.5% | Of property value |
+| Vacancy | 8% | ~1 month/year |
+| Maintenance | 1% | Annual reserve |
+| Property Mgmt | 10% | Of gross rent |
+| CapEx | 1% | Replacement reserve |
 
-1. **Indianapolis, IN** - Strong rent-to-price, landlord friendly
-2. **Cleveland, OH** - Excellent cash flow, low entry price
-3. **Memphis, TN** - Good cash flow, FedEx hub
-4. **Birmingham, AL** - Low taxes, affordable entry
-5. **Kansas City, MO** - Balanced growth and cash flow
+## Target Markets
+
+| Rank | Market | Strengths |
+|------|--------|-----------|
+| 1 | Indianapolis, IN | High rent-to-price, landlord friendly, diverse economy |
+| 2 | Cleveland, OH | Excellent cash flow, low entry price, healthcare anchor |
+| 3 | Memphis, TN | Good cash flow, FedEx hub, landlord friendly |
+| 4 | Birmingham, AL | Lowest taxes, affordable, university/medical |
+| 5 | Kansas City, MO | Balanced growth + cash flow, stable |
+| 6 | Tampa, FL | Population growth, appreciation potential |
+| 7 | Phoenix, AZ | Strong growth, cooling from peak |
+| 8 | Austin, TX | Tech hub, high growth, expensive |
+
+## Deployment
+
+### Fly.io
+
+```bash
+# Deploy API
+fly launch  # First time
+fly deploy
+
+# Deploy Web (from web/ directory)
+cd web
+fly launch
+fly deploy
+```
+
+### Docker Compose
+
+```bash
+docker compose up -d
+```
+
+### Environment Variables
+
+**API:**
+- `LOG_LEVEL` - Logging level (default: INFO)
+- `DATABASE_URL` - PostgreSQL connection (optional)
+
+**Web:**
+- `API_URL` - Backend API URL (default: http://localhost:8000)
 
 ## Running Tests
 
@@ -143,52 +196,29 @@ pip install -e ".[dev]"
 # Run tests
 pytest tests/ -v
 
-# Run with coverage
-pytest tests/ --cov=src
+# With coverage
+pytest tests/ --cov=src --cov-report=html
 ```
 
-## API Usage
+## Future Data Sources (Planned)
 
-```python
-import asyncio
-from src.agents.pipeline import PipelineAgent
-from src.models.deal import InvestmentStrategy
-
-async def find_deals():
-    agent = PipelineAgent()
-    result = await agent.run(
-        market_ids=["indianapolis_in", "cleveland_oh"],
-        strategy=InvestmentStrategy.CASH_FLOW,
-        max_price=250000,
-        top_n=10,
-    )
-
-    for deal in result.data["deals"]:
-        print(f"{deal.property.address}: ${deal.financial_metrics.monthly_cash_flow}/mo")
-
-asyncio.run(find_deals())
-```
+| Source | Purpose | Cost |
+|--------|---------|------|
+| Redfin Data Center | Market metrics | Free |
+| FRED | Macro data (rates, etc.) | Free |
+| BLS | Employment data | Free |
+| Census/ACS | Demographics | Free |
+| RentCast | Rent estimates | Free tier (50/mo) |
+| URL Parser | Import from Zillow/Redfin links | Free |
 
 ## Roadmap
 
-### Phase 1 (Current) - Foundation
-- [x] Market research agent
-- [x] Basic cash flow model
-- [x] Mock data scraper
-- [x] CLI interface
-- [x] Sensitivity analysis
-
-### Phase 2 - Automation
-- [ ] Multi-source data ingestion
-- [ ] PostgreSQL persistence
-- [ ] Real scraping (Zillow, Redfin)
-- [ ] Automated monitoring
-
-### Phase 3 - Intelligence
-- [ ] Advanced sensitivity analysis
-- [ ] Email/Slack alerting
-- [ ] Explainability features
-- [ ] Web dashboard
+- [x] Phase 1: Foundation (CLI, models, agents)
+- [x] Phase 1.5: Web Application (FastAPI + Next.js)
+- [ ] Phase 2: Real Data Sources (Redfin DC, FRED, RentCast)
+- [ ] Phase 2.5: URL-to-Deal Import
+- [ ] Phase 3: Alerting & Monitoring
+- [ ] Phase 4: PostgreSQL Persistence
 
 ## License
 
