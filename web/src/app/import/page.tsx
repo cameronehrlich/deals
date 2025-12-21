@@ -124,9 +124,11 @@ export default function ImportPage() {
     const grm = monthlyRent > 0 ? offerPrice / (monthlyRent * 12) : 0;
     const breakEvenOccupancy = monthlyRent > 0 ? (totalMonthlyExpenses - monthlyVacancy) / monthlyRent : 1;
 
-    // Calculate deal score (simplified)
-    const financialScore = Math.min(100, Math.max(0, 50 + (cashOnCash * 500)));
-    const dealScore = Math.round(financialScore * 0.7 + (capRate > 0.08 ? 30 : capRate * 375));
+    // Use backend score as base, adjust proportionally for offer price changes
+    const originalScore = result?.deal?.score?.overall_score || 50;
+    const priceDiscount = (listPrice - offerPrice) / listPrice;
+    // Boost score slightly for discounted offers (better returns), max +15 points
+    const dealScore = Math.round(Math.min(100, originalScore + (priceDiscount * 50)));
 
     return {
       monthlyCashFlow,
