@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { Suspense, useEffect, useState, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
-import { Search, Filter, SlidersHorizontal } from "lucide-react";
+import { Search, SlidersHorizontal } from "lucide-react";
 import { api, Deal, Market } from "@/lib/api";
 import { DealCard } from "@/components/DealCard";
 import { LoadingPage, LoadingSpinner } from "@/components/LoadingSpinner";
@@ -13,7 +13,7 @@ const STRATEGIES = [
   { value: "value_add", label: "Value Add" },
 ];
 
-export default function DealsPage() {
+function DealsContent() {
   const searchParams = useSearchParams();
   const initialMarket = searchParams.get("markets") || "";
 
@@ -240,5 +240,13 @@ export default function DealsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function DealsPage() {
+  return (
+    <Suspense fallback={<LoadingPage />}>
+      <DealsContent />
+    </Suspense>
   );
 }
