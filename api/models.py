@@ -56,14 +56,14 @@ class MarketDetail(MarketSummary):
     rent_change_1yr: Optional[float] = None
     months_of_inventory: Optional[float] = None
     days_on_market_avg: Optional[int] = None
-    price_trend: str
-    rent_trend: str
-    landlord_friendly: bool
+    price_trend: str = "stable"
+    rent_trend: str = "stable"
+    landlord_friendly: bool = True
     property_tax_rate: Optional[float] = None
     insurance_risk: Optional[str] = None
-    affordability_score: float
-    stability_score: float
-    liquidity_score: float
+    affordability_score: float = 50.0
+    stability_score: float = 50.0
+    liquidity_score: float = 50.0
 
 
 class MarketsResponse(BaseModel):
