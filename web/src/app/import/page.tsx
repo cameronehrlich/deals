@@ -471,7 +471,7 @@ export default function ImportPage() {
                   <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
                     <DollarSign className="h-5 w-5 text-primary-600" />
                     Financial Analysis
-                    {offerPrice !== listPrice && (
+                    {offerPrice && offerPrice !== listPrice && (
                       <span className="text-sm font-normal text-primary-600 ml-2">
                         (at {formatCurrency(offerPrice)} offer)
                       </span>
