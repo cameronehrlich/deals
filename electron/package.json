@@ -56,7 +56,7 @@
   },
   "dependencies": {
     "electron-store": "^8.1.0",
-    "puppeteer": "^21.6.1"
+    "puppeteer": "^24.34.0"
   },
   "devDependencies": {
     "electron": "^28.1.0",
