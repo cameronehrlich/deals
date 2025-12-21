@@ -1,0 +1,111 @@
+# Investment Strategy Definitions
+
+strategies:
+  cash_flow:
+    name: "Cash Flow Buy & Hold"
+    description: "Focus on immediate positive cash flow from rental income"
+    min_cash_on_cash: 0.08
+    min_cap_rate: 0.06
+    min_monthly_cash_flow: 200
+    max_price_to_rent: 120  # Max price / monthly rent ratio (GRM)
+    preferred_property_types:
+      - single_family_home
+      - duplex
+      - triplex
+      - fourplex
+    weight_adjustments:
+      financial: 0.50
+      market: 0.25
+      risk: 0.15
+      liquidity: 0.10
+    hold_period_years: 10
+
+  appreciation:
+    name: "Break-even + Appreciation"
+    description: "Accept lower cash flow for higher appreciation potential"
+    min_cash_on_cash: 0.02
+    min_cap_rate: 0.04
+    min_monthly_cash_flow: 0
+    target_appreciation: 0.05  # 5% annual
+    preferred_markets:
+      - high_growth
+      - tech_hub
+    weight_adjustments:
+      financial: 0.25
+      market: 0.45
+      risk: 0.20
+      liquidity: 0.10
+    hold_period_years: 5
+
+  value_add:
+    name: "Value-Add / BRRRR"
+    description: "Properties with renovation potential for forced appreciation"
+    min_cash_on_cash: 0.10  # After refinance
+    target_arv_discount: 0.25  # Buy at 25% below ARV
+    min_equity_capture: 0.20
+    preferred_property_types:
+      - single_family_home
+      - duplex
+    indicators:
+      - high_days_on_market
+      - price_reduction
+      - older_construction
+      - below_market_rent
+    weight_adjustments:
+      financial: 0.35
+      market: 0.30
+      risk: 0.25
+      liquidity: 0.10
+    hold_period_years: 5
+
+  distressed:
+    name: "Distressed / Deep Discount"
+    description: "Foreclosures, auctions, REO properties"
+    min_discount_to_market: 0.30
+    min_cash_on_cash: 0.12
+    property_sources:
+      - foreclosure
+      - auction
+      - reo
+      - short_sale
+    weight_adjustments:
+      financial: 0.45
+      market: 0.20
+      risk: 0.25
+      liquidity: 0.10
+    hold_period_years: 3
+
+# Default Financial Assumptions
+defaults:
+  loan:
+    down_payment_pct: 0.25
+    interest_rate: 0.07
+    loan_term_years: 30
+    closing_cost_pct: 0.03
+
+  expenses:
+    property_tax_rate: 0.012
+    insurance_rate: 0.005
+    maintenance_rate: 0.01
+    property_management_rate: 0.10
+    vacancy_rate: 0.08
+    capex_rate: 0.01
+
+  appreciation:
+    annual_price_growth: 0.03
+    annual_rent_growth: 0.02
+
+# Score Weights (default)
+scoring:
+  financial_weight: 0.40
+  market_weight: 0.30
+  risk_weight: 0.20
+  liquidity_weight: 0.10
+
+# Thresholds for filtering
+thresholds:
+  min_cash_on_cash: 0.06
+  min_cap_rate: 0.05
+  max_grm: 15
+  min_dscr: 1.0
+  max_break_even_occupancy: 0.85

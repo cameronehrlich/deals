@@ -1,0 +1,53 @@
+# Target Market Configuration
+
+# Primary focus markets - high cash flow potential
+tier_1_markets:
+  - id: indianapolis_in
+    priority: 1
+    notes: "Strong rent-to-price, landlord friendly, stable economy"
+
+  - id: cleveland_oh
+    priority: 2
+    notes: "Excellent cash flow, low entry price, healthcare anchor"
+
+  - id: memphis_tn
+    priority: 3
+    notes: "Good cash flow, FedEx hub, landlord friendly"
+
+  - id: birmingham_al
+    priority: 4
+    notes: "Low taxes, affordable, university/medical presence"
+
+  - id: kansas_city_mo
+    priority: 5
+    notes: "Balanced growth and cash flow, diverse economy"
+
+# Secondary markets - balance of cash flow and growth
+tier_2_markets:
+  - id: tampa_fl
+    priority: 6
+    notes: "Population growth, but higher prices and insurance"
+
+  - id: phoenix_az
+    priority: 7
+    notes: "Strong growth, but prices cooling from peak"
+
+  - id: austin_tx
+    priority: 8
+    notes: "Tech hub, high growth, but expensive entry"
+
+# Market selection criteria
+selection_criteria:
+  min_population: 500000
+  min_rent_to_price: 0.005  # 0.5%
+  landlord_friendly: true
+  max_property_tax_rate: 0.025
+  max_insurance_risk: medium
+
+# Excluded markets (regulatory or risk concerns)
+excluded_markets:
+  - los_angeles_ca  # Rent control
+  - san_francisco_ca  # Rent control
+  - new_york_ny  # Rent control
+  - portland_or  # Rent control
+  - seattle_wa  # Rent control
