@@ -144,43 +144,6 @@ export default function ImportPage() {
     };
   }, [result, offerPrice, downPaymentPct, interestRate]);
 
-  // Calculate target price for 8% CoC
-  const targetPriceFor8Pct = useMemo(() => {
-    if (!result?.deal?.property.estimated_rent) return null;
-
-    const monthlyRent = result.deal.property.estimated_rent;
-    const downPct = parseFloat(downPaymentPct) / 100;
-    const rate = parseFloat(interestRate) / 100;
-
-    // Binary search for price that gives ~8% CoC
-    let low = 50000;
-    let high = result.deal.property.list_price * 1.5;
-
-    for (let i = 0; i < 20; i++) {
-      const mid = (low + high) / 2;
-      const downPayment = mid * downPct;
-      const closingCosts = mid * 0.03;
-      const totalCash = downPayment + closingCosts;
-      const loanAmount = mid - downPayment;
-
-      const monthlyRate = rate / 12;
-      const numPayments = 360;
-      const monthlyMortgage = loanAmount * (monthlyRate * Math.pow(1 + monthlyRate, numPayments)) / (Math.pow(1 + monthlyRate, numPayments) - 1);
-
-      const expenses = monthlyMortgage + (mid * 0.012 / 12) + (mid * 0.005 / 12) + (monthlyRent * 0.08) + (mid * 0.01 / 12) + (mid * 0.01 / 12) + (monthlyRent * 0.10);
-      const cashFlow = (monthlyRent - expenses) * 12;
-      const coc = cashFlow / totalCash;
-
-      if (coc < 0.08) {
-        high = mid;
-      } else {
-        low = mid;
-      }
-    }
-
-    return Math.round(low / 1000) * 1000;
-  }, [result, downPaymentPct, interestRate]);
-
   const listPrice = result?.deal?.property.list_price || 0;
   const minPrice = Math.round(listPrice * 0.7);
   const maxPrice = listPrice;
@@ -433,36 +396,6 @@ export default function ImportPage() {
                         <span>{formatCurrency(maxPrice)} (List)</span>
                       </div>
                     </div>
-
-                    {adjustedFinancials && adjustedFinancials.discount > 0 && (
-                      <div className="bg-white rounded-lg p-3 border border-primary-200">
-                        <p className="text-sm text-gray-600">
-                          At <span className="font-bold">{formatCurrency(offerPrice)}</span> ({adjustedFinancials.discount.toFixed(1)}% below list):
-                        </p>
-                        <div className="grid grid-cols-3 gap-4 mt-2">
-                          <div className="text-center">
-                            <p className="text-xs text-gray-500">Cash Flow</p>
-                            <p className={cn("font-bold", getCashFlowColor(adjustedFinancials.monthlyCashFlow))}>
-                              {formatCurrency(adjustedFinancials.monthlyCashFlow)}/mo
-                            </p>
-                          </div>
-                          <div className="text-center">
-                            <p className="text-xs text-gray-500">CoC Return</p>
-                            <p className="font-bold">{formatPercent(adjustedFinancials.cashOnCash)}</p>
-                          </div>
-                          <div className="text-center">
-                            <p className="text-xs text-gray-500">Cap Rate</p>
-                            <p className="font-bold">{formatPercent(adjustedFinancials.capRate)}</p>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {targetPriceFor8Pct && targetPriceFor8Pct < listPrice && (
-                      <p className="text-sm text-primary-700">
-                        <strong>Tip:</strong> Offer around {formatCurrency(targetPriceFor8Pct)} to hit 8% cash-on-cash return
-                      </p>
-                    )}
                   </div>
                 </div>
               )}
