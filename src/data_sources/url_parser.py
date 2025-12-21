@@ -228,7 +228,15 @@ class PropertyUrlParser:
         # Try to find JSON-LD data first (most reliable)
         json_ld = self._extract_json_ld(html, "SingleFamilyResidence")
         if json_ld:
-            return self._parse_zillow_jsonld(url, json_ld)
+            result = self._parse_zillow_jsonld(url, json_ld)
+            # JSON-LD often missing bathrooms - supplement with HTML parsing
+            if result and result.bathrooms == 0:
+                html_result = self._parse_zillow_html(url, html)
+                if html_result:
+                    result.bathrooms = html_result.bathrooms
+                    if result.bedrooms == 0:
+                        result.bedrooms = html_result.bedrooms
+            return result
 
         # Fallback to regex parsing
         return self._parse_zillow_html(url, html)
@@ -251,6 +259,13 @@ class PropertyUrlParser:
                             return item
                 elif data.get("@type") == schema_type:
                     return data
+                # Handle Zillow's nested structure: RealEstateListing -> offers -> itemOffered
+                elif data.get("@type") == "RealEstateListing":
+                    item_offered = data.get("offers", {}).get("itemOffered", {})
+                    if item_offered.get("@type") == schema_type:
+                        # Merge price from offers into itemOffered
+                        item_offered["_price"] = data.get("offers", {}).get("price")
+                        return item_offered
             except json.JSONDecodeError:
                 continue
 
@@ -260,13 +275,20 @@ class PropertyUrlParser:
         """Parse Zillow JSON-LD data."""
         address = data.get("address", {})
 
-        # Parse price
-        price_str = str(data.get("offers", {}).get("price", "0"))
-        price = float(re.sub(r"[^\d.]", "", price_str) or 0)
+        # Parse price (check _price from nested structure first, then offers)
+        price = data.get("_price") or data.get("offers", {}).get("price", 0)
+        if isinstance(price, str):
+            price = float(re.sub(r"[^\d.]", "", price) or 0)
 
         # Parse square footage
         sqft_str = str(data.get("floorSize", {}).get("value", ""))
         sqft = int(float(re.sub(r"[^\d.]", "", sqft_str) or 0)) or None
+
+        # Get bedrooms - try numberOfBedrooms first (correct field), then numberOfRooms as fallback
+        bedrooms = data.get("numberOfBedrooms") or data.get("numberOfRooms", 0)
+
+        # Get bathrooms - Zillow often omits this from JSON-LD
+        bathrooms = data.get("numberOfBathroomsTotal", 0)
 
         return ParsedProperty(
             url=url,
@@ -276,8 +298,8 @@ class PropertyUrlParser:
             state=address.get("addressRegion", ""),
             zip_code=address.get("postalCode", ""),
             list_price=price,
-            bedrooms=int(data.get("numberOfRooms", 0)),
-            bathrooms=float(data.get("numberOfBathroomsTotal", 0)),
+            bedrooms=int(bedrooms) if bedrooms else 0,
+            bathrooms=float(bathrooms) if bathrooms else 0,
             sqft=sqft,
             latitude=float(data.get("geo", {}).get("latitude", 0)) or None,
             longitude=float(data.get("geo", {}).get("longitude", 0)) or None,
