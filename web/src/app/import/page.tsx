@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import {
   Link2,
@@ -12,6 +12,8 @@ import {
   Loader2,
   TrendingUp,
   MapPin,
+  Info,
+  MinusCircle,
 } from "lucide-react";
 import { api, ImportUrlResponse, Deal } from "@/lib/api";
 import {
@@ -36,6 +38,9 @@ export default function ImportPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Offer price adjustment state
+  const [offerPrice, setOfferPrice] = useState<number | null>(null);
+
   const handleImport = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -48,6 +53,7 @@ export default function ImportPage() {
       setLoading(true);
       setError(null);
       setResult(null);
+      setOfferPrice(null);
 
       const response = await api.importFromUrl({
         url: url.trim(),
@@ -56,6 +62,9 @@ export default function ImportPage() {
       });
 
       setResult(response);
+      if (response.deal?.property.list_price) {
+        setOfferPrice(response.deal.property.list_price);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Import failed");
     } finally {
@@ -67,13 +76,112 @@ export default function ImportPage() {
     setUrl("");
     setResult(null);
     setError(null);
+    setOfferPrice(null);
   };
 
-  const exampleUrls = [
-    "https://www.zillow.com/homedetails/...",
-    "https://www.redfin.com/...",
-    "https://www.realtor.com/...",
-  ];
+  // Calculate adjusted financials based on offer price
+  const adjustedFinancials = useMemo(() => {
+    if (!result?.deal?.financials || !result?.deal?.property || offerPrice === null) {
+      return null;
+    }
+
+    const listPrice = result.deal.property.list_price;
+    const monthlyRent = result.deal.property.estimated_rent || 0;
+    const downPct = parseFloat(downPaymentPct) / 100;
+    const rate = parseFloat(interestRate) / 100;
+
+    // Calculate new values based on offer price
+    const downPayment = offerPrice * downPct;
+    const closingCosts = offerPrice * 0.03;
+    const totalCashInvested = downPayment + closingCosts;
+    const loanAmount = offerPrice - downPayment;
+
+    // Monthly mortgage payment (P&I)
+    const monthlyRate = rate / 12;
+    const numPayments = 30 * 12;
+    const monthlyMortgage = loanAmount * (monthlyRate * Math.pow(1 + monthlyRate, numPayments)) / (Math.pow(1 + monthlyRate, numPayments) - 1);
+
+    // Operating expenses (estimated)
+    const monthlyTaxes = (offerPrice * 0.012) / 12;
+    const monthlyInsurance = (offerPrice * 0.005) / 12;
+    const monthlyVacancy = monthlyRent * 0.08;
+    const monthlyMaintenance = (offerPrice * 0.01) / 12;
+    const monthlyCapex = (offerPrice * 0.01) / 12;
+    const monthlyPM = monthlyRent * 0.10;
+
+    const totalMonthlyExpenses = monthlyMortgage + monthlyTaxes + monthlyInsurance + monthlyVacancy + monthlyMaintenance + monthlyCapex + monthlyPM;
+    const monthlyCashFlow = monthlyRent - totalMonthlyExpenses;
+    const annualCashFlow = monthlyCashFlow * 12;
+
+    // NOI (before debt service)
+    const annualRent = monthlyRent * 12;
+    const annualOperatingExpenses = (monthlyTaxes + monthlyInsurance + monthlyVacancy + monthlyMaintenance + monthlyCapex + monthlyPM) * 12;
+    const noi = annualRent - annualOperatingExpenses;
+
+    const cashOnCash = totalCashInvested > 0 ? annualCashFlow / totalCashInvested : 0;
+    const capRate = offerPrice > 0 ? noi / offerPrice : 0;
+    const rentToPrice = offerPrice > 0 ? (monthlyRent / offerPrice) : 0;
+    const grm = monthlyRent > 0 ? offerPrice / (monthlyRent * 12) : 0;
+    const breakEvenOccupancy = monthlyRent > 0 ? (totalMonthlyExpenses - monthlyVacancy) / monthlyRent : 1;
+
+    // Calculate deal score (simplified)
+    const financialScore = Math.min(100, Math.max(0, 50 + (cashOnCash * 500)));
+    const dealScore = Math.round(financialScore * 0.7 + (capRate > 0.08 ? 30 : capRate * 375));
+
+    return {
+      monthlyCashFlow,
+      annualCashFlow,
+      cashOnCash,
+      capRate,
+      rentToPrice,
+      totalCashInvested,
+      grm,
+      breakEvenOccupancy,
+      dealScore,
+      discount: ((listPrice - offerPrice) / listPrice) * 100,
+    };
+  }, [result, offerPrice, downPaymentPct, interestRate]);
+
+  // Calculate target price for 8% CoC
+  const targetPriceFor8Pct = useMemo(() => {
+    if (!result?.deal?.property.estimated_rent) return null;
+
+    const monthlyRent = result.deal.property.estimated_rent;
+    const downPct = parseFloat(downPaymentPct) / 100;
+    const rate = parseFloat(interestRate) / 100;
+
+    // Binary search for price that gives ~8% CoC
+    let low = 50000;
+    let high = result.deal.property.list_price * 1.5;
+
+    for (let i = 0; i < 20; i++) {
+      const mid = (low + high) / 2;
+      const downPayment = mid * downPct;
+      const closingCosts = mid * 0.03;
+      const totalCash = downPayment + closingCosts;
+      const loanAmount = mid - downPayment;
+
+      const monthlyRate = rate / 12;
+      const numPayments = 360;
+      const monthlyMortgage = loanAmount * (monthlyRate * Math.pow(1 + monthlyRate, numPayments)) / (Math.pow(1 + monthlyRate, numPayments) - 1);
+
+      const expenses = monthlyMortgage + (mid * 0.012 / 12) + (mid * 0.005 / 12) + (monthlyRent * 0.08) + (mid * 0.01 / 12) + (mid * 0.01 / 12) + (monthlyRent * 0.10);
+      const cashFlow = (monthlyRent - expenses) * 12;
+      const coc = cashFlow / totalCash;
+
+      if (coc < 0.08) {
+        high = mid;
+      } else {
+        low = mid;
+      }
+    }
+
+    return Math.round(low / 1000) * 1000;
+  }, [result, downPaymentPct, interestRate]);
+
+  const listPrice = result?.deal?.property.list_price || 0;
+  const minPrice = Math.round(listPrice * 0.7);
+  const maxPrice = listPrice;
 
   return (
     <div className="space-y-6">
@@ -254,8 +362,8 @@ export default function ImportPage() {
                       {result.deal.property.city}, {result.deal.property.state} {result.deal.property.zip_code}
                     </p>
                   </div>
-                  {result.deal.score && (
-                    <ScoreGauge score={result.deal.score.overall_score} label="Deal Score" size="md" />
+                  {adjustedFinancials && (
+                    <ScoreGauge score={adjustedFinancials.dealScore} label="Deal Score" size="md" />
                   )}
                 </div>
 
@@ -266,7 +374,15 @@ export default function ImportPage() {
                     <p className="font-bold text-lg">{formatCurrency(result.deal.property.list_price)}</p>
                   </div>
                   <div>
-                    <p className="text-sm text-gray-500">Est. Rent</p>
+                    <p className="text-sm text-gray-500 flex items-center gap-1">
+                      Est. Rent
+                      <span
+                        className="cursor-help"
+                        title="Source: HUD Fair Market Rent (FMR) - Based on local area median rents by bedroom count"
+                      >
+                        <Info className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600" />
+                      </span>
+                    </p>
                     <p className="font-bold text-lg">
                       {result.deal.property.estimated_rent
                         ? formatCurrency(result.deal.property.estimated_rent) + '/mo'
@@ -288,12 +404,78 @@ export default function ImportPage() {
                 </div>
               </div>
 
+              {/* Offer Price Slider */}
+              {offerPrice !== null && (
+                <div className="card border-primary-200 bg-primary-50">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                    <TrendingUp className="h-5 w-5 text-primary-600" />
+                    What Should I Offer?
+                  </h3>
+
+                  <div className="space-y-4">
+                    <div>
+                      <div className="flex justify-between text-sm mb-2">
+                        <span className="text-gray-600">Offer Price</span>
+                        <span className="font-bold text-lg">{formatCurrency(offerPrice)}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={minPrice}
+                        max={maxPrice}
+                        value={offerPrice}
+                        onChange={(e) => setOfferPrice(parseInt(e.target.value))}
+                        className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-primary-600"
+                      />
+                      <div className="flex justify-between text-xs text-gray-500 mt-1">
+                        <span>{formatCurrency(minPrice)} (-30%)</span>
+                        <span>{formatCurrency(maxPrice)} (List)</span>
+                      </div>
+                    </div>
+
+                    {adjustedFinancials && adjustedFinancials.discount > 0 && (
+                      <div className="bg-white rounded-lg p-3 border border-primary-200">
+                        <p className="text-sm text-gray-600">
+                          At <span className="font-bold">{formatCurrency(offerPrice)}</span> ({adjustedFinancials.discount.toFixed(1)}% below list):
+                        </p>
+                        <div className="grid grid-cols-3 gap-4 mt-2">
+                          <div className="text-center">
+                            <p className="text-xs text-gray-500">Cash Flow</p>
+                            <p className={cn("font-bold", getCashFlowColor(adjustedFinancials.monthlyCashFlow))}>
+                              {formatCurrency(adjustedFinancials.monthlyCashFlow)}/mo
+                            </p>
+                          </div>
+                          <div className="text-center">
+                            <p className="text-xs text-gray-500">CoC Return</p>
+                            <p className="font-bold">{formatPercent(adjustedFinancials.cashOnCash)}</p>
+                          </div>
+                          <div className="text-center">
+                            <p className="text-xs text-gray-500">Cap Rate</p>
+                            <p className="font-bold">{formatPercent(adjustedFinancials.capRate)}</p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {targetPriceFor8Pct && targetPriceFor8Pct < listPrice && (
+                      <p className="text-sm text-primary-700">
+                        <strong>Tip:</strong> Offer around {formatCurrency(targetPriceFor8Pct)} to hit 8% cash-on-cash return
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* Financial Metrics */}
-              {result.deal.financials && (
+              {adjustedFinancials && (
                 <div className="card">
                   <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
                     <DollarSign className="h-5 w-5 text-primary-600" />
                     Financial Analysis
+                    {offerPrice !== listPrice && (
+                      <span className="text-sm font-normal text-primary-600 ml-2">
+                        (at {formatCurrency(offerPrice)} offer)
+                      </span>
+                    )}
                   </h3>
 
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -301,27 +483,27 @@ export default function ImportPage() {
                       <p className="text-sm text-gray-500">Monthly Cash Flow</p>
                       <p className={cn(
                         "text-xl font-bold mt-1",
-                        getCashFlowColor(result.deal.financials.monthly_cash_flow)
+                        getCashFlowColor(adjustedFinancials.monthlyCashFlow)
                       )}>
-                        {formatCurrency(result.deal.financials.monthly_cash_flow)}
+                        {formatCurrency(adjustedFinancials.monthlyCashFlow)}
                       </p>
                     </div>
                     <div className="text-center p-3 bg-gray-50 rounded-lg">
                       <p className="text-sm text-gray-500">Cash-on-Cash</p>
                       <p className="text-xl font-bold mt-1">
-                        {formatPercent(result.deal.financials.cash_on_cash_return)}
+                        {formatPercent(adjustedFinancials.cashOnCash)}
                       </p>
                     </div>
                     <div className="text-center p-3 bg-gray-50 rounded-lg">
                       <p className="text-sm text-gray-500">Cap Rate</p>
                       <p className="text-xl font-bold mt-1">
-                        {formatPercent(result.deal.financials.cap_rate)}
+                        {formatPercent(adjustedFinancials.capRate)}
                       </p>
                     </div>
                     <div className="text-center p-3 bg-gray-50 rounded-lg">
                       <p className="text-sm text-gray-500">Rent-to-Price</p>
                       <p className="text-xl font-bold mt-1">
-                        {formatPercent(result.deal.financials.rent_to_price_ratio)}
+                        {formatPercent(adjustedFinancials.rentToPrice)}
                       </p>
                     </div>
                   </div>
@@ -330,28 +512,28 @@ export default function ImportPage() {
                     <div>
                       <p className="text-sm text-gray-500">Total Cash Needed</p>
                       <p className="font-semibold">
-                        {formatCurrency(result.deal.financials.total_cash_invested)}
+                        {formatCurrency(adjustedFinancials.totalCashInvested)}
                       </p>
                     </div>
                     <div>
                       <p className="text-sm text-gray-500">Annual Cash Flow</p>
                       <p className={cn(
                         "font-semibold",
-                        getCashFlowColor(result.deal.financials.annual_cash_flow)
+                        getCashFlowColor(adjustedFinancials.annualCashFlow)
                       )}>
-                        {formatCurrency(result.deal.financials.annual_cash_flow)}
+                        {formatCurrency(adjustedFinancials.annualCashFlow)}
                       </p>
                     </div>
                     <div>
                       <p className="text-sm text-gray-500">GRM</p>
                       <p className="font-semibold">
-                        {result.deal.financials.gross_rent_multiplier.toFixed(1)}
+                        {adjustedFinancials.grm.toFixed(1)}
                       </p>
                     </div>
                     <div>
                       <p className="text-sm text-gray-500">Break-even Occupancy</p>
                       <p className="font-semibold">
-                        {formatPercent(result.deal.financials.break_even_occupancy)}
+                        {formatPercent(adjustedFinancials.breakEvenOccupancy)}
                       </p>
                     </div>
                   </div>
@@ -359,42 +541,63 @@ export default function ImportPage() {
               )}
 
               {/* Pros and Cons */}
-              {(result.deal.pros.length > 0 || result.deal.cons.length > 0) && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {result.deal.pros.length > 0 && (
-                    <div className="card border-green-200">
-                      <h3 className="font-semibold text-green-800 mb-3 flex items-center gap-2">
-                        <CheckCircle className="h-5 w-5" />
-                        Pros
-                      </h3>
-                      <ul className="space-y-2">
-                        {result.deal.pros.map((pro, i) => (
-                          <li key={i} className="text-sm text-gray-700 flex items-start gap-2">
-                            <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                            {pro}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                  {result.deal.cons.length > 0 && (
-                    <div className="card border-red-200">
-                      <h3 className="font-semibold text-red-800 mb-3 flex items-center gap-2">
-                        <AlertTriangle className="h-5 w-5" />
-                        Cons
-                      </h3>
-                      <ul className="space-y-2">
-                        {result.deal.cons.map((con, i) => (
-                          <li key={i} className="text-sm text-gray-700 flex items-start gap-2">
-                            <AlertTriangle className="h-4 w-4 text-red-500 mt-0.5 flex-shrink-0" />
-                            {con}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Pros - always show */}
+                <div className={cn(
+                  "card",
+                  result.deal.pros.length > 0 ? "border-green-200" : "border-gray-200"
+                )}>
+                  <h3 className={cn(
+                    "font-semibold mb-3 flex items-center gap-2",
+                    result.deal.pros.length > 0 ? "text-green-800" : "text-gray-400"
+                  )}>
+                    <CheckCircle className="h-5 w-5" />
+                    Pros
+                  </h3>
+                  {result.deal.pros.length > 0 ? (
+                    <ul className="space-y-2">
+                      {result.deal.pros.map((pro, i) => (
+                        <li key={i} className="text-sm text-gray-700 flex items-start gap-2">
+                          <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
+                          {pro}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-sm text-gray-400 italic">No standout pros identified</p>
                   )}
                 </div>
-              )}
+
+                {/* Cons - always show */}
+                <div className={cn(
+                  "card",
+                  result.deal.cons.length > 0 ? "border-red-200" : "border-gray-200"
+                )}>
+                  <h3 className={cn(
+                    "font-semibold mb-3 flex items-center gap-2",
+                    result.deal.cons.length > 0 ? "text-red-800" : "text-gray-400"
+                  )}>
+                    {result.deal.cons.length > 0 ? (
+                      <AlertTriangle className="h-5 w-5" />
+                    ) : (
+                      <MinusCircle className="h-5 w-5" />
+                    )}
+                    Cons
+                  </h3>
+                  {result.deal.cons.length > 0 ? (
+                    <ul className="space-y-2">
+                      {result.deal.cons.map((con, i) => (
+                        <li key={i} className="text-sm text-gray-700 flex items-start gap-2">
+                          <AlertTriangle className="h-4 w-4 text-red-500 mt-0.5 flex-shrink-0" />
+                          {con}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-sm text-gray-400 italic">No significant cons identified</p>
+                  )}
+                </div>
+              </div>
 
               {/* Actions */}
               <div className="flex gap-3">
