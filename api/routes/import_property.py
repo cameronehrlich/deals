@@ -76,6 +76,8 @@ async def import_from_url(request: ImportUrlRequest):
     Parses the listing, enriches with rent estimate and market data,
     and returns a fully analyzed deal.
     """
+    import asyncio
+
     aggregator = DataAggregator()
     warnings = []
 
@@ -91,8 +93,17 @@ async def import_from_url(request: ImportUrlRequest):
                 detail="Unsupported URL. Please use Zillow, Redfin, or Realtor.com URLs."
             )
 
-        # Import and analyze
-        deal = await aggregator.import_from_url(request.url)
+        # Import and analyze with timeout (Vercel has 10s limit)
+        try:
+            deal = await asyncio.wait_for(
+                aggregator.import_from_url(request.url),
+                timeout=8.0
+            )
+        except asyncio.TimeoutError:
+            raise HTTPException(
+                status_code=408,
+                detail="Import timed out. The listing site may be blocking requests. Please use manual entry instead."
+            )
 
         if not deal:
             raise HTTPException(
