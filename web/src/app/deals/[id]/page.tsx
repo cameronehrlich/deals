@@ -61,9 +61,11 @@ export default function DealDetailPage() {
   if (loading) return <LoadingPage />;
   if (error || !deal) {
     return (
-      <div className="text-center py-12">
-        <p className="text-red-600">{error || "Deal not found"}</p>
-        <Link href="/deals" className="text-primary-600 hover:underline mt-4 inline-block">
+      <div className="text-center py-12 animate-fade-in">
+        <Home className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+        <p className="text-red-600 font-medium">{error || "Deal not found"}</p>
+        <p className="text-gray-500 text-sm mt-2">The property you're looking for may have been removed or sold.</p>
+        <Link href="/deals" className="btn-primary mt-4 inline-block">
           ← Back to deals
         </Link>
       </div>
@@ -73,11 +75,11 @@ export default function DealDetailPage() {
   const { property, financials, score, market } = deal;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-fade-in">
       {/* Back link */}
       <Link
         href="/deals"
-        className="inline-flex items-center gap-2 text-gray-600 hover:text-gray-900"
+        className="inline-flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors"
       >
         <ArrowLeft className="h-4 w-4" />
         Back to deals

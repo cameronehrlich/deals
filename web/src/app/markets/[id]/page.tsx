@@ -56,21 +56,38 @@ export default function MarketDetailPage() {
   if (loading) return <LoadingPage />;
   if (error || !market) {
     return (
-      <div className="text-center py-12">
+      <div className="text-center py-12 animate-fade-in">
+        <MapPin className="h-12 w-12 text-gray-300 mx-auto mb-4" />
         <p className="text-red-600">{error || "Market not found"}</p>
-        <Link href="/markets" className="text-primary-600 hover:underline mt-4 inline-block">
+        <Link href="/markets" className="btn-primary mt-4 inline-block">
           ← Back to markets
         </Link>
       </div>
     );
   }
 
+  // Helper function for score progress bar
+  const ScoreBar = ({ score, label, color }: { score: number; label: string; color: string }) => (
+    <div className="space-y-1">
+      <div className="flex justify-between text-sm">
+        <span className="text-gray-600">{label}</span>
+        <span className="font-semibold">{score.toFixed(0)}</span>
+      </div>
+      <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all duration-500 ${color}`}
+          style={{ width: `${score}%` }}
+        />
+      </div>
+    </div>
+  );
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-fade-in">
       {/* Back link */}
       <Link
         href="/markets"
-        className="inline-flex items-center gap-2 text-gray-600 hover:text-gray-900"
+        className="inline-flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors"
       >
         <ArrowLeft className="h-4 w-4" />
         Back to markets
@@ -97,18 +114,45 @@ export default function MarketDetailPage() {
         </Link>
       </div>
 
-      {/* Scores */}
-      <div className="card">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">
-          Investment Scores
-        </h2>
-        <div className="flex flex-wrap justify-around gap-6">
-          <ScoreGauge score={market.overall_score} label="Overall" size="lg" />
-          <ScoreGauge score={market.cash_flow_score} label="Cash Flow" size="md" />
-          <ScoreGauge score={market.growth_score} label="Growth" size="md" />
-          <ScoreGauge score={market.affordability_score} label="Affordability" size="md" />
-          <ScoreGauge score={market.stability_score} label="Stability" size="md" />
-          <ScoreGauge score={market.liquidity_score} label="Liquidity" size="md" />
+      {/* Scores - Visual Dashboard */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Overall Score */}
+        <div className="card flex flex-col items-center justify-center py-8">
+          <ScoreGauge score={market.overall_score} label="Overall Score" size="lg" />
+          <p className="text-sm text-gray-500 mt-4 text-center">
+            {market.overall_score >= 70 ? "Excellent investment market" :
+             market.overall_score >= 50 ? "Good investment potential" :
+             "Consider other markets"}
+          </p>
+        </div>
+
+        {/* Score Breakdown */}
+        <div className="card lg:col-span-2">
+          <h2 className="text-lg font-semibold text-gray-900 mb-6">
+            Score Breakdown
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <ScoreBar score={market.cash_flow_score} label="Cash Flow Potential" color="bg-green-500" />
+            <ScoreBar score={market.growth_score} label="Growth Potential" color="bg-blue-500" />
+            <ScoreBar score={market.affordability_score} label="Affordability" color="bg-purple-500" />
+            <ScoreBar score={market.stability_score} label="Economic Stability" color="bg-orange-500" />
+            <ScoreBar score={market.liquidity_score} label="Market Liquidity" color="bg-cyan-500" />
+            {/* Investment Quick Stats */}
+            <div className="md:col-span-2 pt-4 border-t border-gray-100">
+              <div className="flex flex-wrap gap-4 text-sm">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-green-500" />
+                  <span className="text-gray-600">Cash Flow:</span>
+                  <span className="font-medium">{market.rent_to_price_ratio?.toFixed(2)}% rent/price</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-blue-500" />
+                  <span className="text-gray-600">Growth:</span>
+                  <span className="font-medium">{market.price_change_1yr ? `${market.price_change_1yr > 0 ? "+" : ""}${market.price_change_1yr}%` : "N/A"} YoY</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 

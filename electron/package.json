@@ -1,0 +1,65 @@
+{
+  "name": "dealfinder",
+  "version": "1.0.0",
+  "description": "Real Estate Deal Sourcing & Analysis Platform",
+  "main": "main.js",
+  "author": "Cameron Ehrlich",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dev": "NODE_ENV=development electron .",
+    "build": "electron-builder",
+    "build:mac": "electron-builder --mac",
+    "build:win": "electron-builder --win",
+    "build:linux": "electron-builder --linux"
+  },
+  "build": {
+    "appId": "com.dealfinder.app",
+    "productName": "DealFinder",
+    "directories": {
+      "output": "dist"
+    },
+    "mac": {
+      "category": "public.app-category.finance",
+      "icon": "assets/icon.icns",
+      "target": ["dmg", "zip"]
+    },
+    "win": {
+      "target": ["nsis", "portable"]
+    },
+    "linux": {
+      "target": ["AppImage", "deb"]
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "scraper.js",
+      "assets/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../web/.next/standalone",
+        "to": "app",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../web/.next/static",
+        "to": "app/.next/static",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../web/public",
+        "to": "app/public",
+        "filter": ["**/*"]
+      }
+    ]
+  },
+  "dependencies": {
+    "electron-store": "^8.1.0",
+    "puppeteer": "^21.6.1"
+  },
+  "devDependencies": {
+    "electron": "^28.1.0",
+    "electron-builder": "^24.9.1"
+  }
+}
