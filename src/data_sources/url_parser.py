@@ -73,6 +73,44 @@ class ParsedProperty:
             self.features = []
         if self.images is None:
             self.images = []
+        # Validate and sanitize values
+        self._sanitize()
+
+    def _sanitize(self):
+        """Sanitize parsed values to catch obvious parsing errors."""
+        # Bedrooms: typically 0-10 for residential
+        if self.bedrooms < 0 or self.bedrooms > 20:
+            self.bedrooms = 0
+
+        # Bathrooms: typically 0.5-10 for residential
+        # Common bug: "3.0" parsed as "30" - detect and fix
+        if self.bathrooms > 10:
+            # Likely a decimal parsing error (e.g., 30 should be 3.0)
+            if self.bathrooms in [10, 15, 20, 25, 30, 35, 40, 45, 50]:
+                self.bathrooms = self.bathrooms / 10
+            else:
+                self.bathrooms = 0  # Invalid, reset
+
+        if self.bathrooms < 0:
+            self.bathrooms = 0
+
+        # Sqft: typically 200-20000 for residential
+        if self.sqft is not None:
+            if self.sqft < 100 or self.sqft > 50000:
+                self.sqft = None
+
+        # Year built: reasonable range
+        if self.year_built is not None:
+            if self.year_built < 1800 or self.year_built > 2030:
+                self.year_built = None
+
+        # Days on market: can't be negative
+        if self.days_on_market < 0:
+            self.days_on_market = 0
+
+        # Price sanity check
+        if self.list_price < 0:
+            self.list_price = 0
 
     def to_property(self) -> Property:
         """Convert to Property model."""
@@ -325,19 +363,38 @@ class PropertyUrlParser:
         state = addr_match.group(3)
         zip_code = addr_match.group(4)
 
-        # Extract price
+        # Extract price - look for price in structured data first
         price_match = re.search(r'\$[\d,]+', html)
         price = float(re.sub(r"[^\d]", "", price_match.group(0))) if price_match else 0
 
-        # Extract beds/baths
-        beds_match = re.search(r'(\d+)\s*(?:bd|bed|bedroom)', html, re.IGNORECASE)
-        baths_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:ba|bath|bathroom)', html, re.IGNORECASE)
+        # Extract beds/baths - use more specific patterns with word boundaries
+        # Look for common formats: "3 bd", "3 beds", "3 Bed", "3bd"
+        beds_match = re.search(r'\b(\d{1,2})\s*(?:bd|beds?|bdrm|BR)\b', html, re.IGNORECASE)
+
+        # Look for bath patterns: "2 ba", "2.5 bath", "2 Baths", etc.
+        # More restrictive: require 1-2 digits, optional decimal with 1 digit
+        baths_match = re.search(r'\b(\d{1,2}(?:\.\d)?)\s*(?:ba|baths?|bathroom)\b', html, re.IGNORECASE)
 
         beds = int(beds_match.group(1)) if beds_match else 0
         baths = float(baths_match.group(1)) if baths_match else 0
 
-        # Extract sqft
-        sqft_match = re.search(r'([\d,]+)\s*(?:sq\s*ft|sqft|square feet)', html, re.IGNORECASE)
+        # Additional validation: if we got unreasonable values, try alternate patterns
+        if beds == 0:
+            # Try "X bedroom" format
+            alt_beds = re.search(r'(\d{1,2})\s*bedroom', html, re.IGNORECASE)
+            if alt_beds:
+                beds = int(alt_beds.group(1))
+
+        if baths == 0 or baths > 10:
+            # Try more specific patterns like "X.X Ba" or "X Full Bath"
+            alt_baths = re.search(r'(\d{1,2}(?:\.\d)?)\s*(?:full\s+)?bath', html, re.IGNORECASE)
+            if alt_baths:
+                baths = float(alt_baths.group(1))
+            else:
+                baths = 0
+
+        # Extract sqft - require reasonable range (3-5 digits)
+        sqft_match = re.search(r'\b([\d,]{3,6})\s*(?:sq\.?\s*ft\.?|sqft|square\s*feet?)\b', html, re.IGNORECASE)
         sqft = int(re.sub(r"[^\d]", "", sqft_match.group(1))) if sqft_match else None
 
         return ParsedProperty(
@@ -420,10 +477,13 @@ class PropertyUrlParser:
         price_match = re.search(r'\$[\d,]+', html)
         price = float(re.sub(r"[^\d]", "", price_match.group(0))) if price_match else 0
 
-        # Extract property details
-        beds_match = re.search(r'(\d+)\s*(?:Beds?|BR)', html, re.IGNORECASE)
-        baths_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:Baths?|BA)', html, re.IGNORECASE)
-        sqft_match = re.search(r'([\d,]+)\s*(?:Sq\.?\s*Ft\.?|SF)', html, re.IGNORECASE)
+        # Extract property details with word boundaries for accuracy
+        beds_match = re.search(r'\b(\d{1,2})\s*(?:Beds?|BR|Bd)\b', html, re.IGNORECASE)
+        baths_match = re.search(r'\b(\d{1,2}(?:\.\d)?)\s*(?:Baths?|BA)\b', html, re.IGNORECASE)
+        sqft_match = re.search(r'\b([\d,]{3,6})\s*(?:Sq\.?\s*Ft\.?|SF)\b', html, re.IGNORECASE)
+
+        beds = int(beds_match.group(1)) if beds_match else 0
+        baths = float(baths_match.group(1)) if baths_match else 0
 
         return ParsedProperty(
             url=url,
@@ -433,8 +493,8 @@ class PropertyUrlParser:
             state=addr_match.group(3),
             zip_code=addr_match.group(4),
             list_price=price,
-            bedrooms=int(beds_match.group(1)) if beds_match else 0,
-            bathrooms=float(baths_match.group(1)) if baths_match else 0,
+            bedrooms=beds,
+            bathrooms=baths,
             sqft=int(re.sub(r"[^\d]", "", sqft_match.group(1))) if sqft_match else None,
         )
 

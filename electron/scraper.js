@@ -215,8 +215,19 @@ async function scrapeRealtor(page, url) {
 async function extractBathroomsFromPage(page) {
   return await page.evaluate(() => {
     const text = document.body.innerText;
-    const match = text.match(/(\d+\.?\d*)\s*(?:ba|bath|bathroom)/i);
-    return match ? parseFloat(match[1]) : 0;
+    // Use word boundary and limit to 1-2 digits to avoid matching prices
+    const match = text.match(/\b(\d{1,2}(?:\.\d)?)\s*(?:ba|baths?|bathroom)/i);
+    let baths = match ? parseFloat(match[1]) : 0;
+    // Sanity check: if > 10, likely a parsing error
+    if (baths > 10) {
+      // Common error: "3.0" -> "30", fix it
+      if ([10, 15, 20, 25, 30, 35, 40, 45, 50].includes(baths)) {
+        baths = baths / 10;
+      } else {
+        baths = 0;
+      }
+    }
+    return baths;
   });
 }
 
@@ -233,12 +244,26 @@ async function extractFromPage(page) {
     const priceMatch = text.match(/\$[\d,]+/);
     const price = priceMatch ? parseInt(priceMatch[0].replace(/[^0-9]/g, '')) : 0;
 
-    // Extract beds/baths
-    const bedsMatch = text.match(/(\d+)\s*(?:bd|bed|bedroom)/i);
-    const bathsMatch = text.match(/(\d+\.?\d*)\s*(?:ba|bath|bathroom)/i);
+    // Extract beds/baths with word boundaries and digit limits
+    const bedsMatch = text.match(/\b(\d{1,2})\s*(?:bd|beds?|bedroom|bdrm|BR)\b/i);
+    const bathsMatch = text.match(/\b(\d{1,2}(?:\.\d)?)\s*(?:ba|baths?|bathroom)\b/i);
 
-    // Extract sqft
-    const sqftMatch = text.match(/([\d,]+)\s*(?:sq\s*ft|sqft|square feet)/i);
+    let beds = bedsMatch ? parseInt(bedsMatch[1]) : 0;
+    let baths = bathsMatch ? parseFloat(bathsMatch[1]) : 0;
+
+    // Sanity checks
+    if (beds > 20) beds = 0;
+    if (baths > 10) {
+      // Common error: "3.0" -> "30", fix it
+      if ([10, 15, 20, 25, 30, 35, 40, 45, 50].includes(baths)) {
+        baths = baths / 10;
+      } else {
+        baths = 0;
+      }
+    }
+
+    // Extract sqft - require 3-6 digits
+    const sqftMatch = text.match(/\b([\d,]{3,6})\s*(?:sq\.?\s*ft\.?|sqft|square\s*feet?)\b/i);
     const sqft = sqftMatch ? parseInt(sqftMatch[1].replace(/,/g, '')) : null;
 
     return {
@@ -247,8 +272,8 @@ async function extractFromPage(page) {
       state: addrMatch?.[3] || '',
       zip_code: addrMatch?.[4] || '',
       list_price: price,
-      bedrooms: bedsMatch ? parseInt(bedsMatch[1]) : 0,
-      bathrooms: bathsMatch ? parseFloat(bathsMatch[1]) : 0,
+      bedrooms: beds,
+      bathrooms: baths,
       sqft,
       property_type: 'single_family_home',
     };
