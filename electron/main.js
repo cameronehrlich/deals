@@ -11,10 +11,18 @@ const API_URL = process.env.API_URL || 'https://deals-api-swart.vercel.app';
 function createWindow() {
   // Create the browser window
   mainWindow = new BrowserWindow({
+    title: 'DealFinder',
     width: 1400,
     height: 900,
     minWidth: 1000,
     minHeight: 700,
+    // Liquid Glass effect (macOS)
+    vibrancy: 'under-window',
+    visualEffectState: 'active',
+    transparent: true,
+    backgroundColor: '#00000000',
+    titleBarStyle: 'hiddenInset',
+    trafficLightPosition: { x: 15, y: 15 },
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

@@ -4,7 +4,11 @@
       "WebFetch(domain:deals-tau-seven.vercel.app)",
       "WebFetch(domain:deals-api-swart.vercel.app)",
       "Bash(curl:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(source .venv/bin/activate:*)",
+      "Bash(uvicorn:*)",
+      "Bash(npm run dev:*)",
+      "Bash(cat:*)"
     ]
   }
 }

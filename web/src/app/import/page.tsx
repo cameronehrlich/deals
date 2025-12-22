@@ -34,7 +34,7 @@ export default function ImportPage() {
 
   // Form state
   const [url, setUrl] = useState("");
-  const [downPaymentPct, setDownPaymentPct] = useState("25");
+  const [downPaymentPct, setDownPaymentPct] = useState("20");
   const [interestRate, setInterestRate] = useState("7");
 
   // Results state
@@ -278,21 +278,7 @@ export default function ImportPage() {
                   />
                 </div>
                 <div>
-                  <label className="label flex items-center justify-between">
-                    <span>Interest Rate (%)</span>
-                    {loadingRates ? (
-                      <LoadingSpinner size="sm" />
-                    ) : macroData?.mortgage_30yr ? (
-                      <button
-                        type="button"
-                        onClick={() => setInterestRate(macroData.mortgage_30yr!.toFixed(2))}
-                        className="text-xs text-primary-600 hover:text-primary-700 flex items-center gap-1"
-                      >
-                        <Zap className="h-3 w-3" />
-                        Current
-                      </button>
-                    ) : null}
-                  </label>
+                  <label className="label">Interest Rate (%)</label>
                   <input
                     type="number"
                     value={interestRate}
@@ -300,8 +286,20 @@ export default function ImportPage() {
                     className="input"
                     min="1"
                     max="20"
-                    step="0.25"
+                    step="any"
                   />
+                  {loadingRates ? (
+                    <div className="mt-1"><LoadingSpinner size="sm" /></div>
+                  ) : macroData?.mortgage_30yr ? (
+                    <button
+                      type="button"
+                      onClick={() => setInterestRate(macroData.mortgage_30yr!.toFixed(2))}
+                      className="text-xs text-primary-600 hover:text-primary-700 flex items-center gap-1 mt-1"
+                    >
+                      <Zap className="h-3 w-3" />
+                      Use current ({macroData.mortgage_30yr.toFixed(2)}%)
+                    </button>
+                  ) : null}
                 </div>
               </div>
 

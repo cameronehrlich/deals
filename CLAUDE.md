@@ -9,6 +9,7 @@ Real Estate Deal Sourcing & Analysis Platform - an automated system to source, a
 **Tech Stack:**
 - Backend: Python 3.10+, FastAPI, Pydantic
 - Frontend: Next.js 14, React, TypeScript, Tailwind CSS
+- Desktop: Electron 28, Puppeteer (local scraping)
 - Data: httpx for async HTTP, pandas for data processing
 - Testing: pytest, pytest-asyncio
 
@@ -98,6 +99,8 @@ web/src/
 
 ## Running the Project
 
+### Web Mode (Browser)
+
 ```bash
 # Install Python dependencies
 pip install -e .
@@ -117,6 +120,44 @@ pytest tests/ -v
 # Type check frontend
 cd web && npx tsc --noEmit
 ```
+
+### Electron Mac App (Local Development)
+
+The Electron app provides a native Mac experience with local property scraping (avoids IP blocking on Vercel).
+
+```bash
+# Terminal 1: Start API server
+uvicorn api.main:app --reload
+
+# Terminal 2: Start Next.js dev server
+cd web && npm run dev
+
+# Terminal 3: Start Electron app
+cd electron && npm run dev
+```
+
+The Electron app loads from `localhost:3000` in development and uses local Puppeteer for scraping.
+
+### Electron Structure
+
+```
+electron/
+├── main.js          # Main Electron process, window config, IPC handlers
+├── preload.js       # Context bridge exposing electronAPI to renderer
+├── scraper.js       # Puppeteer-based local scraping for Zillow/Redfin/Realtor
+└── package.json     # Electron and Puppeteer dependencies
+```
+
+**Key Features:**
+- Liquid Glass UI (macOS vibrancy effect)
+- Hidden title bar with traffic lights
+- Local scraping via Puppeteer (residential IP = no blocking)
+- IPC bridge for secure communication between main/renderer
+
+**Environment:**
+- `NODE_ENV=development` - Loads from localhost:3000
+- `NODE_ENV=production` - Loads from Vercel deployment
+- `API_URL` - Override API URL (default: Vercel API)
 
 ## Common Tasks
 

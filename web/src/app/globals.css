@@ -12,6 +12,23 @@ body {
   background: rgb(var(--background-rgb));
 }
 
+/* Electron title bar */
+.electron-title-bar {
+  -webkit-app-region: drag;
+  height: 38px;
+  background: linear-gradient(to bottom, #f9fafb, #f3f4f6);
+  border-bottom: 1px solid #e5e7eb;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.electron-title-bar span {
+  font-size: 13px;
+  font-weight: 500;
+  color: #374151;
+}
+
 @layer components {
   .card {
     @apply bg-white rounded-lg shadow-sm border border-gray-200 p-6;
