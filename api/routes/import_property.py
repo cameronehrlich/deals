@@ -337,8 +337,8 @@ async def import_parsed_property(request: ImportParsedRequest):
             try:
                 from src.db import get_repository
                 repo = get_repository()
-                saved_property = repo.save_deal(deal)
-                saved_id = saved_property.id
+                saved_deal = await repo.save_deal(deal)
+                saved_id = saved_deal.id
             except Exception as e:
                 warnings.append(f"Could not save to database: {str(e)}")
 

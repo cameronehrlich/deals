@@ -57,6 +57,19 @@ class SQLiteRepository(DealRepository):
             .first()
         )
 
+        # Calculate financial metrics
+        cash_flow = None
+        cash_on_cash = None
+        cap_rate = None
+        if deal.financials:
+            cash_flow = deal.financials.monthly_cash_flow
+            # Calculate cash-on-cash: annual_cash_flow / total_cash_needed
+            if deal.financials.annual_cash_flow and deal.financials.total_cash_needed:
+                cash_on_cash = deal.financials.annual_cash_flow / deal.financials.total_cash_needed
+            # Calculate cap rate: NOI / purchase_price
+            if deal.financials.net_operating_income:
+                cap_rate = deal.financials.net_operating_income / deal.financials.purchase_price
+
         if existing:
             # Update existing
             existing.list_price = deal.property.list_price
@@ -64,9 +77,9 @@ class SQLiteRepository(DealRepository):
             existing.pipeline_status = deal.pipeline_status.value
             existing.analysis_data = deal.model_dump(mode='json')
             existing.overall_score = deal.score.overall_score if deal.score else None
-            existing.cash_flow = deal.financials.monthly_cash_flow if deal.financials else None
-            existing.cash_on_cash = deal.financials.cash_on_cash_return if deal.financials else None
-            existing.cap_rate = deal.financials.cap_rate if deal.financials else None
+            existing.cash_flow = cash_flow
+            existing.cash_on_cash = cash_on_cash
+            existing.cap_rate = cap_rate
             existing.is_favorite = deal.is_favorite
             existing.updated_at = datetime.utcnow()
         else:
@@ -88,9 +101,9 @@ class SQLiteRepository(DealRepository):
                 source_url=deal.property.source_url,
                 analysis_data=deal.model_dump(mode='json'),
                 overall_score=deal.score.overall_score if deal.score else None,
-                cash_flow=deal.financials.monthly_cash_flow if deal.financials else None,
-                cash_on_cash=deal.financials.cash_on_cash_return if deal.financials else None,
-                cap_rate=deal.financials.cap_rate if deal.financials else None,
+                cash_flow=cash_flow,
+                cash_on_cash=cash_on_cash,
+                cap_rate=cap_rate,
                 pipeline_status=deal.pipeline_status.value,
                 is_favorite=deal.is_favorite,
             )
