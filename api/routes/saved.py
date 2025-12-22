@@ -177,6 +177,100 @@ async def toggle_market_favorite(market_id: str):
     )
 
 
+@router.post("/markets/{market_id}/refresh", response_model=MarketResponse)
+async def refresh_market_data(market_id: str):
+    """Fetch fresh market data and update scores."""
+    from src.data_sources.aggregator import DataAggregator
+    from src.models.market import Market, MarketMetrics
+
+    repo = get_repository()
+
+    # Find market in database
+    from src.db.models import MarketDB
+    market_db = repo.session.query(MarketDB).filter_by(id=market_id).first()
+
+    if not market_db:
+        raise HTTPException(status_code=404, detail="Market not found")
+
+    aggregator = DataAggregator()
+    try:
+        # Fetch market data from external sources
+        market_data = await aggregator.get_market_data(market_db.name, market_db.state)
+
+        if market_data:
+            # Convert to Market model for scoring
+            market = market_data.to_market()
+
+            # Calculate scores
+            metrics = MarketMetrics.from_market(market)
+
+            # Update database
+            market_db.market_data = market.model_dump(mode='json')
+            market_db.overall_score = metrics.overall_score
+            market_db.cash_flow_score = metrics.cash_flow_score
+            market_db.growth_score = metrics.growth_score
+            market_db.updated_at = datetime.utcnow()
+            repo.session.commit()
+    finally:
+        await aggregator.close()
+
+    return MarketResponse(
+        id=market_db.id,
+        name=market_db.name,
+        state=market_db.state,
+        metro=market_db.metro,
+        is_favorite=market_db.is_favorite,
+        is_supported=market_db.is_supported,
+        api_support=market_db.api_support,
+        overall_score=market_db.overall_score or 0,
+        cash_flow_score=market_db.cash_flow_score or 0,
+        growth_score=market_db.growth_score or 0,
+    )
+
+
+@router.post("/markets/refresh-all")
+async def refresh_all_markets():
+    """Refresh data for all favorite markets."""
+    from src.data_sources.aggregator import DataAggregator
+    from src.models.market import Market, MarketMetrics
+    from src.db.models import MarketDB
+
+    repo = get_repository()
+    markets = repo.get_favorite_markets()
+
+    aggregator = DataAggregator()
+    updated = 0
+    errors = []
+
+    try:
+        for market_db in markets:
+            try:
+                market_data = await aggregator.get_market_data(market_db.name, market_db.state)
+                if market_data:
+                    market = market_data.to_market()
+                    metrics = MarketMetrics.from_market(market)
+
+                    market_db.market_data = market.model_dump(mode='json')
+                    market_db.overall_score = metrics.overall_score
+                    market_db.cash_flow_score = metrics.cash_flow_score
+                    market_db.growth_score = metrics.growth_score
+                    market_db.updated_at = datetime.utcnow()
+                    updated += 1
+            except Exception as e:
+                errors.append(f"{market_db.name}: {str(e)}")
+
+        repo.session.commit()
+    finally:
+        await aggregator.close()
+
+    return {
+        "success": True,
+        "updated": updated,
+        "total": len(markets),
+        "errors": errors if errors else None
+    }
+
+
 # ==================== Saved Property Routes ====================
 
 @router.get("/properties", response_model=List[SavedPropertyResponse])

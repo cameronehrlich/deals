@@ -123,7 +123,8 @@ class RedfinDataCenter:
 
             # Parse TSV
             reader = csv.DictReader(io.StringIO(content), delimiter="\t")
-            data = list(reader)
+            # Normalize column names to lowercase
+            data = [{k.lower(): v for k, v in row.items()} for row in reader]
 
             # Cache
             self._cache[cache_key] = (datetime.utcnow(), data)
@@ -155,7 +156,7 @@ class RedfinDataCenter:
                     return datetime.utcnow()
 
             return RedfinMarketData(
-                region_name=row.get("region_name", ""),
+                region_name=row.get("region", "") or row.get("region_name", ""),
                 region_type=row.get("region_type", ""),
                 state=row.get("state", "") or row.get("state_code", ""),
                 period_begin=parse_date(row.get("period_begin")),
@@ -193,7 +194,7 @@ class RedfinDataCenter:
         # Get most recent data for each metro
         latest: dict[str, dict] = {}
         for row in data:
-            region = row.get("region_name", "")
+            region = row.get("region", "") or row.get("region_name", "")
             period = row.get("period_end", "")
             if region and (region not in latest or period > latest[region].get("period_end", "")):
                 latest[region] = row
@@ -214,7 +215,7 @@ class RedfinDataCenter:
         metro_lower = metro_name.lower()
         matches = [
             row for row in data
-            if metro_lower in row.get("region_name", "").lower()
+            if metro_lower in (row.get("region", "") or row.get("region_name", "")).lower()
         ]
 
         if not matches:
