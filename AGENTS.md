@@ -1,16 +1,47 @@
 # Repository Guidelines
 
-## Project Structure & Module Organization
-The repo pairs a FastAPI backend (`api/`), multi-agent Python core (`src/`), Next.js frontend (`web/`), and shared configs/tests. Use `src/agents/*` for pipeline logic, `src/data_sources/*` for Redfin/FRED/HUD integrations, `src/analysis/*` for scoring, and `api/routes/*.py` for HTTP handlers. UI lives in `web/src/app` (routes), `web/src/components` (shared UI), and `web/src/lib` (client utils). Persistent settings, like target markets and strategy weights, live under `config/`. Keep fixtures in `data/` and unit tests in `tests/`. Electron helpers for scraping are isolated in `electron/`.
+## Project Structure
+FastAPI backend (`api/`), Python core (`src/`), Next.js frontend (`web/`), Electron desktop (`electron/`).
 
-## Build, Test, and Development Commands
-Run `make install` once to install Python (editable with extras) and frontend deps. `make dev` launches both API (`uvicorn api.main:app --reload`) and web (`npm run dev`) with live reload. Use `make api` or `make web` when iterating on a single service. For Docker parity, `docker compose up --build` mirrors prod networking. The CLI is available with `python -m src.cli search --markets indianapolis_in`.
+- `src/agents/` - Business logic (MarketResearch, DealAnalyzer, Pipeline)
+- `src/data_sources/` - External APIs (Redfin, FRED, HUD, RentCast, US Real Estate)
+- `src/data_sources/real_estate_providers/` - Pluggable property data providers
+- `src/db/` - SQLite persistence (sqlite_repository.py, models.py, cache.py)
+- `src/analysis/` - Scoring and sensitivity analysis
+- `api/routes/` - HTTP handlers (markets, deals, properties, import, saved)
+- `web/src/app/` - Next.js pages
+- `web/src/components/` - React components
+- `web/src/lib/` - API client and utilities
+- `electron/` - Desktop app with Puppeteer scraping
+- `config/` - Strategy and market configs
+- `tests/` - Test suite
 
-## Coding Style & Naming Conventions
-Python modules follow Black defaults (4-space indent, double quotes ok) and Ruff linting; run `make format` or `make lint` before committing. Prefer snake_case for functions/vars, PascalCase for classes/agents (e.g., `DealAnalyzer`). Frontend is TypeScript + Next 14 with ESLint (`npm run lint`); React components stay PascalCase under `web/src/components`, hooks/utilities use camelCase filenames (`useDeals.ts`). Keep configs in YAML using kebab-case keys to match existing files.
+## Development Commands
+```bash
+# Install
+pip install -e . && cd web && npm install
 
-## Testing Guidelines
-Pytests live in `tests/` and mirror module layout (`test_agents.py`, `test_data_sources.py`). Run `make test` (pytest -v) locally; use `make test-cov` to ensure critical flows hit `src/agents`, `src/analysis`, and `api/routes`. When adding adapters, provide fixture-driven tests that mock network responses. Frontend changes must at least run `npm run lint`; snapshot or Playwright tests are optional but document manual steps for UI-heavy changes.
+# Run API + Web
+uvicorn api.main:app --reload  # Terminal 1
+cd web && npm run dev          # Terminal 2
 
-## Commit & Pull Request Guidelines
-Git history favors short, imperative subject lines (“Fix Electron title bar…”). Reference the component touched and avoid trailing punctuation; squash noisy work-in-progress commits. PRs should include: 1) summary of behavior change, 2) linked issue or context, 3) verification notes (pytest, lint, `docker compose up`, screenshots for UI diffs). Mention config or data migrations explicitly so reviewers can replicate.
+# Run Electron (optional)
+cd electron && npm run dev     # Terminal 3
+
+# Tests
+pytest tests/ -v
+cd web && npx tsc --noEmit
+```
+
+## Coding Style
+- Python: Black defaults, snake_case functions/vars, PascalCase classes
+- TypeScript: ESLint, PascalCase components, camelCase utilities
+- Run `make lint` before committing
+
+## Commits
+Short imperative subject lines. Reference component touched. Squash WIP commits.
+
+Example: "Add image carousel to property cards"
+
+## Pull Requests
+Include: 1) Summary of change, 2) Context/issue, 3) Verification steps (pytest, lint, screenshots for UI)
