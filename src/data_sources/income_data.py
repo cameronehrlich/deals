@@ -147,9 +147,24 @@ class IncomeDataClient:
         Returns:
             IncomeData object or None if not available
         """
-        # Check cache first
+        # Check in-memory cache first
         if zip_code in self._cache:
             return self._cache[zip_code]
+
+        # Check persistent database cache
+        try:
+            from src.db import get_repository
+            repo = get_repository()
+            cached = repo.cache.get_income(zip_code)
+            if cached:
+                income_data = IncomeData(
+                    zip_code=zip_code,
+                    median_income=cached["median_income"],
+                )
+                self._cache[zip_code] = income_data
+                return income_data
+        except Exception:
+            pass  # DB not available, continue to API
 
         if not self.is_configured:
             return None
@@ -171,6 +186,20 @@ class IncomeDataClient:
                     median_income=data["medianIncome"],
                 )
                 self._cache[zip_code] = income_data
+
+                # Also persist to database cache
+                try:
+                    from src.db import get_repository
+                    repo = get_repository()
+                    repo.cache.set_income(
+                        zip_code=zip_code,
+                        median_income=data["medianIncome"],
+                        income_tier=income_data.income_tier,
+                        data=data
+                    )
+                except Exception:
+                    pass  # DB not available
+
                 return income_data
 
             return None

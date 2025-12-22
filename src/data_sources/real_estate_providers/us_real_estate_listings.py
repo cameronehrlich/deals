@@ -180,10 +180,30 @@ class USRealEstateListingsProvider(BaseProvider):
         if property_type:
             params["type"] = property_type
 
+        # Check cache first
+        try:
+            from src.db import get_repository
+            repo = get_repository()
+            cached = repo.cache.get(self.name, "search", params)
+            if cached:
+                print(f"{self.display_name}: Cache hit for {location}")
+                listings = cached.get("listings", [])
+                return [self._parse_listing(item) for item in listings]
+        except Exception:
+            pass  # Cache not available
+
         data = await self._request("/for-sale", params)
 
         if not data:
             return []
+
+        # Cache the results (1 hour TTL)
+        try:
+            from src.db import get_repository
+            repo = get_repository()
+            repo.cache.set(self.name, "search", params, data, ttl_hours=1)
+        except Exception:
+            pass  # Cache not available
 
         listings = data.get("listings", [])
         return [self._parse_listing(item) for item in listings]
@@ -194,10 +214,30 @@ class USRealEstateListingsProvider(BaseProvider):
     ) -> Optional[PropertyDetail]:
         """Get property details by ID."""
         params = {"property_id": property_id}
+
+        # Check cache first (24 hour TTL for property details)
+        try:
+            from src.db import get_repository
+            repo = get_repository()
+            cached = repo.cache.get(self.name, "property_detail", params)
+            if cached:
+                print(f"{self.display_name}: Cache hit for property {property_id}")
+                return self._parse_detail(cached)
+        except Exception:
+            pass
+
         data = await self._request("/v2/property", params)
 
         if not data:
             return None
+
+        # Cache the results (24 hour TTL)
+        try:
+            from src.db import get_repository
+            repo = get_repository()
+            repo.cache.set(self.name, "property_detail", params, data, ttl_hours=24)
+        except Exception:
+            pass
 
         return self._parse_detail(data)
 

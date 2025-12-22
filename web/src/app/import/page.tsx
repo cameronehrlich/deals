@@ -18,6 +18,8 @@ import {
   Database,
   Monitor,
   BarChart3,
+  Bookmark,
+  BookmarkCheck,
 } from "lucide-react";
 import { api, ImportUrlResponse, Deal, MacroDataResponse, PropertyListing } from "@/lib/api";
 import {
@@ -59,6 +61,10 @@ function AnalyzePageContent() {
   // Property passed from search results
   const [passedProperty, setPassedProperty] = useState<PropertyListing | null>(null);
   const [autoAnalyzing, setAutoAnalyzing] = useState(false);
+
+  // Save state
+  const [savedId, setSavedId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   // Check if running in Electron on mount
   useEffect(() => {
@@ -226,8 +232,59 @@ function AnalyzePageContent() {
     setError(null);
     setOfferPrice(null);
     setPassedProperty(null);
+    setSavedId(null);
     // Clear URL params
     router.replace("/import");
+  };
+
+  // Save property to database
+  const handleSave = async () => {
+    if (!result?.deal || saving || savedId) return;
+
+    try {
+      setSaving(true);
+
+      // Get property data from the result or passed property
+      const property = passedProperty || {
+        address: result.deal.property.address,
+        city: result.deal.property.city,
+        state: result.deal.property.state,
+        zip_code: result.deal.property.zip_code,
+        price: result.deal.property.list_price,
+        bedrooms: result.deal.property.bedrooms,
+        bathrooms: result.deal.property.bathrooms,
+        sqft: result.deal.property.sqft,
+        property_type: result.deal.property.property_type,
+        source: result.source || "manual",
+        source_url: url || undefined,
+      };
+
+      // Re-analyze with save=true
+      const response = await api.importParsed({
+        address: property.address,
+        city: property.city,
+        state: property.state,
+        zip_code: property.zip_code,
+        list_price: property.price || result.deal.property.list_price,
+        bedrooms: property.bedrooms,
+        bathrooms: property.bathrooms,
+        sqft: property.sqft || undefined,
+        property_type: property.property_type,
+        source: property.source,
+        source_url: property.source_url,
+        down_payment_pct: parseFloat(downPaymentPct) / 100,
+        interest_rate: parseFloat(interestRate) / 100,
+        save: true,
+      });
+
+      if (response.saved_id) {
+        setSavedId(response.saved_id);
+      }
+    } catch (err) {
+      console.error("Failed to save property:", err);
+    } finally {
+      setSaving(false);
+    }
   };
 
   // Calculate adjusted financials based on offer price
@@ -725,7 +782,7 @@ function AnalyzePageContent() {
               </div>
 
               {/* Actions */}
-              <div className="flex gap-3">
+              <div className="flex flex-wrap gap-3">
                 <button
                   onClick={reset}
                   className="btn-outline"
@@ -742,9 +799,34 @@ function AnalyzePageContent() {
                     params.set('rate', interestRate);
                     router.push(`/calculator?${params.toString()}`);
                   }}
-                  className="btn-primary"
+                  className="btn-outline"
                 >
                   Open in Calculator
+                </button>
+                <button
+                  onClick={handleSave}
+                  disabled={saving || !!savedId}
+                  className={cn(
+                    "flex items-center gap-2",
+                    savedId ? "btn-primary bg-green-600 hover:bg-green-700" : "btn-primary"
+                  )}
+                >
+                  {saving ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Saving...
+                    </>
+                  ) : savedId ? (
+                    <>
+                      <BookmarkCheck className="h-4 w-4" />
+                      Saved
+                    </>
+                  ) : (
+                    <>
+                      <Bookmark className="h-4 w-4" />
+                      Save Property
+                    </>
+                  )}
                 </button>
               </div>
             </>

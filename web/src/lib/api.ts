@@ -248,6 +248,52 @@ export interface ImportParsedRequest {
   source_url?: string;
   down_payment_pct?: number;
   interest_rate?: number;
+  save?: boolean;
+}
+
+// Response with saved_id
+export interface ImportParsedResponse extends ImportUrlResponse {
+  saved_id?: string;
+}
+
+// Saved property from database
+export interface SavedProperty {
+  id: string;
+  address: string;
+  city: string;
+  state: string;
+  zip_code?: string;
+  list_price?: number;
+  estimated_rent?: number;
+  bedrooms?: number;
+  bathrooms?: number;
+  sqft?: number;
+  property_type?: string;
+  source?: string;
+  source_url?: string;
+  overall_score?: number;
+  cash_flow?: number;
+  cash_on_cash?: number;
+  cap_rate?: number;
+  pipeline_status: string;
+  is_favorite: boolean;
+  notes?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// Database stats
+export interface DatabaseStats {
+  total_saved_properties: number;
+  favorite_properties: number;
+  total_markets: number;
+  favorite_markets: number;
+  properties_by_status: Record<string, number>;
+  cache: {
+    search_entries: number;
+    income_entries: number;
+    total_api_calls: number;
+  };
 }
 
 class ApiClient {
@@ -374,7 +420,7 @@ class ApiClient {
   }
 
   // Import pre-parsed property (from local Electron scraping)
-  async importParsed(params: ImportParsedRequest): Promise<ImportUrlResponse> {
+  async importParsed(params: ImportParsedRequest): Promise<ImportParsedResponse> {
     return this.fetch("/api/import/parsed", {
       method: "POST",
       body: JSON.stringify(params),
@@ -462,6 +508,60 @@ class ApiClient {
     affordability_rating: string;
   }> {
     return this.fetch(`/api/import/income/${zipCode}/affordability?monthly_rent=${monthlyRent}`);
+  }
+
+  // Saved Properties
+  async getSavedProperties(params?: {
+    status?: string;
+    favorites_only?: boolean;
+    limit?: number;
+    offset?: number;
+  }): Promise<SavedProperty[]> {
+    const searchParams = new URLSearchParams();
+    if (params?.status) searchParams.set("status", params.status);
+    if (params?.favorites_only) searchParams.set("favorites_only", "true");
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    if (params?.offset) searchParams.set("offset", params.offset.toString());
+
+    return this.fetch(`/api/saved/properties?${searchParams}`);
+  }
+
+  async getSavedProperty(propertyId: string): Promise<SavedProperty> {
+    return this.fetch(`/api/saved/properties/${propertyId}`);
+  }
+
+  async getSavedPropertyAnalysis(propertyId: string): Promise<any> {
+    return this.fetch(`/api/saved/properties/${propertyId}/analysis`);
+  }
+
+  async updateSavedProperty(
+    propertyId: string,
+    updates: {
+      pipeline_status?: string;
+      is_favorite?: boolean;
+      note?: string;
+    }
+  ): Promise<SavedProperty> {
+    return this.fetch(`/api/saved/properties/${propertyId}`, {
+      method: "PATCH",
+      body: JSON.stringify(updates),
+    });
+  }
+
+  async togglePropertyFavorite(propertyId: string): Promise<SavedProperty> {
+    return this.fetch(`/api/saved/properties/${propertyId}/favorite`, {
+      method: "POST",
+    });
+  }
+
+  async deleteSavedProperty(propertyId: string): Promise<{ success: boolean }> {
+    return this.fetch(`/api/saved/properties/${propertyId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async getDatabaseStats(): Promise<DatabaseStats> {
+    return this.fetch("/api/saved/stats");
   }
 }
 

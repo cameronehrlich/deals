@@ -45,6 +45,9 @@ class ImportParsedRequest(BaseModel):
     down_payment_pct: float = Field(default=0.25, ge=0.05, le=1.0)
     interest_rate: float = Field(default=0.07, ge=0.01, le=0.25)
 
+    # Persistence
+    save: bool = Field(default=False, description="Save to database for later access")
+
 
 class ImportUrlResponse(BaseModel):
     """Response from URL import."""
@@ -54,6 +57,7 @@ class ImportUrlResponse(BaseModel):
     source: Optional[str] = None
     message: str
     warnings: list[str] = Field(default_factory=list)
+    saved_id: Optional[str] = Field(None, description="ID of saved property if save=True")
 
 
 class RentEstimateRequest(BaseModel):
@@ -327,12 +331,24 @@ async def import_parsed_property(request: ImportParsedRequest):
             last_analyzed=deal.last_analyzed,
         )
 
+        # Save to database if requested
+        saved_id = None
+        if request.save:
+            try:
+                from src.db import get_repository
+                repo = get_repository()
+                saved_property = repo.save_deal(deal)
+                saved_id = saved_property.id
+            except Exception as e:
+                warnings.append(f"Could not save to database: {str(e)}")
+
         return ImportUrlResponse(
             success=True,
             deal=deal_detail,
             source=request.source,
             message=f"Successfully analyzed property from {request.source}",
             warnings=warnings,
+            saved_id=saved_id,
         )
 
     except Exception as e:
