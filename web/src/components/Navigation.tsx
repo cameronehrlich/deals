@@ -9,6 +9,7 @@ import {
   Calculator,
   Building2,
   BarChart3,
+  Bookmark,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ApiUsageIndicator } from "./ApiUsageIndicator";
@@ -17,6 +18,7 @@ const navigation = [
   { name: "Dashboard", href: "/", icon: Home },
   { name: "Markets", href: "/markets", icon: MapPin },
   { name: "Find Deals", href: "/deals", icon: Search },
+  { name: "Saved", href: "/saved", icon: Bookmark },
   { name: "Analyze", href: "/import", icon: BarChart3 },
   { name: "Calculator", href: "/calculator", icon: Calculator },
 ];
