@@ -9,11 +9,12 @@ import {
   ExternalLink,
   Bookmark,
   Database,
-  DollarSign,
   TrendingUp,
   Trash2,
   Star,
   BarChart3,
+  ArrowUpDown,
+  ChevronDown,
 } from "lucide-react";
 import { ImageCarousel } from "@/components/ImageCarousel";
 import { api, PropertyListing, ApiUsage, SavedProperty } from "@/lib/api";
@@ -35,31 +36,79 @@ const LIVE_MARKETS = [
   "Houston, TX",
 ];
 
-// Income data cache
-type IncomeData = {
-  median_income: number;
-  income_tier: string;
-  affordable_rent: number;
+// Sort options for investment analysis
+type SortOption = {
+  value: string;
+  label: string;
+  sortFn: (a: PropertyListing, b: PropertyListing) => number;
 };
+
+const SORT_OPTIONS: SortOption[] = [
+  {
+    value: "price_asc",
+    label: "Price: Low to High",
+    sortFn: (a, b) => a.price - b.price,
+  },
+  {
+    value: "price_desc",
+    label: "Price: High to Low",
+    sortFn: (a, b) => b.price - a.price,
+  },
+  {
+    value: "price_sqft_asc",
+    label: "$/sqft: Low to High",
+    sortFn: (a, b) => (a.price_per_sqft || 999999) - (b.price_per_sqft || 999999),
+  },
+  {
+    value: "price_sqft_desc",
+    label: "$/sqft: High to Low",
+    sortFn: (a, b) => (b.price_per_sqft || 0) - (a.price_per_sqft || 0),
+  },
+  {
+    value: "beds_desc",
+    label: "Bedrooms: Most First",
+    sortFn: (a, b) => b.bedrooms - a.bedrooms,
+  },
+  {
+    value: "beds_asc",
+    label: "Bedrooms: Fewest First",
+    sortFn: (a, b) => a.bedrooms - b.bedrooms,
+  },
+  {
+    value: "sqft_desc",
+    label: "Size: Largest First",
+    sortFn: (a, b) => (b.sqft || 0) - (a.sqft || 0),
+  },
+  {
+    value: "sqft_asc",
+    label: "Size: Smallest First",
+    sortFn: (a, b) => (a.sqft || 999999) - (b.sqft || 999999),
+  },
+  {
+    value: "year_desc",
+    label: "Year: Newest First",
+    sortFn: (a, b) => (b.year_built || 0) - (a.year_built || 0),
+  },
+  {
+    value: "year_asc",
+    label: "Year: Oldest First",
+    sortFn: (a, b) => (a.year_built || 9999) - (b.year_built || 9999),
+  },
+];
+
+// Constants for pagination
+const INITIAL_LOAD = 10;
+const LOAD_MORE_COUNT = 10;
+const MAX_RESULTS = 42; // API free tier max
 
 // Property card for live listings
 function LivePropertyCard({
   property,
-  incomeData,
   onAnalyze,
 }: {
   property: PropertyListing;
-  incomeData?: IncomeData;
   onAnalyze: () => void;
 }) {
-  // Income tier colors
-  const tierColors: Record<string, string> = {
-    high: "bg-green-100 text-green-700",
-    middle: "bg-blue-100 text-blue-700",
-    "low-middle": "bg-amber-100 text-amber-700",
-    low: "bg-gray-100 text-gray-600",
-  };
-
   return (
     <div className="card hover:shadow-lg transition-shadow">
       {/* Photo Carousel */}
@@ -73,16 +122,6 @@ function LivePropertyCard({
           <Radio className="h-3 w-3" />
           Live
         </div>
-        {/* Income tier badge - positioned to not overlap with image counter */}
-        {incomeData && (
-          <div className={cn(
-            "absolute top-10 right-2 px-2 py-1 text-xs font-medium rounded flex items-center gap-1 z-10",
-            tierColors[incomeData.income_tier] || "bg-gray-100 text-gray-600"
-          )}>
-            <DollarSign className="h-3 w-3" />
-            ${Math.round(incomeData.median_income / 1000)}K
-          </div>
-        )}
       </div>
 
       {/* Content */}
@@ -119,18 +158,6 @@ function LivePropertyCard({
           {property.sqft && <span>{property.sqft.toLocaleString()} sqft</span>}
           {property.year_built && <span>Built {property.year_built}</span>}
         </div>
-
-        {/* Income insight */}
-        {incomeData && (
-          <div className="flex items-center gap-2 text-xs text-gray-500 bg-gray-50 px-2 py-1.5 rounded">
-            <TrendingUp className="h-3 w-3" />
-            <span>
-              Area median: ${(incomeData.median_income).toLocaleString()}/yr
-              {" "}|{" "}
-              Affordable rent: ${incomeData.affordable_rent.toLocaleString()}/mo
-            </span>
-          </div>
-        )}
 
         {/* Actions */}
         <div className="flex gap-2 pt-2 border-t border-gray-100">
@@ -294,13 +321,14 @@ function DealsContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
-  // Data mode: "live" (real listings) or "saved" (coming soon)
+  // Data mode: "live" (real listings) or "saved"
   const [dataMode, setDataMode] = useState<"live" | "saved">("live");
 
   // Live properties state
-  const [liveProperties, setLiveProperties] = useState<PropertyListing[]>([]);
+  const [allProperties, setAllProperties] = useState<PropertyListing[]>([]); // Full results from API
+  const [displayCount, setDisplayCount] = useState(INITIAL_LOAD); // How many to show
   const [apiUsage, setApiUsage] = useState<ApiUsage | null>(null);
-  const [incomeByZip, setIncomeByZip] = useState<Record<string, IncomeData>>({});
+  const [sortBy, setSortBy] = useState<string>("price_asc");
 
   // Saved properties state
   const [savedProperties, setSavedProperties] = useState<SavedProperty[]>([]);
@@ -309,6 +337,7 @@ function DealsContent() {
   // Common state
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Filters - Live
@@ -316,50 +345,46 @@ function DealsContent() {
   const [minBeds, setMinBeds] = useState("2");
   const [selectedLocation, setSelectedLocation] = useState(LIVE_MARKETS[0]);
 
-  // Fetch income data for unique zip codes
-  const fetchIncomeData = async (properties: PropertyListing[]) => {
-    const uniqueZips = Array.from(new Set(properties.map(p => p.zip_code).filter(Boolean)));
-    const newIncomeData: Record<string, IncomeData> = { ...incomeByZip };
-
-    // Only fetch zips we don't have
-    const zipsToFetch = uniqueZips.filter(zip => !incomeByZip[zip]);
-
-    for (const zip of zipsToFetch.slice(0, 5)) { // Limit to 5 to save API calls
-      try {
-        const data = await api.getIncomeData(zip);
-        newIncomeData[zip] = {
-          median_income: data.median_income,
-          income_tier: data.income_tier,
-          affordable_rent: data.affordable_rent,
-        };
-      } catch (err) {
-        // Income data not available for this zip
-      }
-    }
-
-    setIncomeByZip(newIncomeData);
-  };
+  // Get sorted and paginated properties
+  const sortedProperties = [...allProperties].sort(
+    SORT_OPTIONS.find(opt => opt.value === sortBy)?.sortFn || ((a, b) => a.price - b.price)
+  );
+  const displayedProperties = sortedProperties.slice(0, displayCount);
+  const hasMore = displayCount < allProperties.length;
+  const canLoadMoreFromApi = allProperties.length < MAX_RESULTS && apiUsage?.requests_remaining && apiUsage.requests_remaining > 0;
 
   // Search live properties
-  const searchLiveProperties = useCallback(async () => {
+  const searchLiveProperties = useCallback(async (append = false) => {
     try {
-      setSearching(true);
+      if (append) {
+        setLoadingMore(true);
+      } else {
+        setSearching(true);
+        setDisplayCount(INITIAL_LOAD);
+      }
       setError(null);
+
+      const currentCount = append ? allProperties.length : 0;
+      const limit = append ? LOAD_MORE_COUNT : INITIAL_LOAD;
 
       const res = await api.searchLiveProperties({
         location: selectedLocation,
         max_price: maxPrice ? parseInt(maxPrice) : undefined,
         min_beds: minBeds ? parseInt(minBeds) : undefined,
-        limit: 20,
+        limit: Math.min(currentCount + limit, MAX_RESULTS),
       });
 
-      setLiveProperties(res.properties);
-      setApiUsage(res.api_usage);
-
-      // Fetch income data for results
-      if (res.properties.length > 0) {
-        fetchIncomeData(res.properties);
+      if (append) {
+        // Only add new properties we don't already have
+        const existingIds = new Set(allProperties.map(p => p.property_id));
+        const newProperties = res.properties.filter(p => !existingIds.has(p.property_id));
+        setAllProperties(prev => [...prev, ...newProperties]);
+        setDisplayCount(prev => prev + newProperties.length);
+      } else {
+        setAllProperties(res.properties);
       }
+
+      setApiUsage(res.api_usage);
 
       if (res.properties.length === 0 && res.api_usage.warning === "limit_reached") {
         setError("API limit reached. Use Calculator for manual analysis.");
@@ -368,9 +393,21 @@ function DealsContent() {
       setError(err instanceof Error ? err.message : "Search failed");
     } finally {
       setSearching(false);
+      setLoadingMore(false);
       setLoading(false);
     }
-  }, [selectedLocation, maxPrice, minBeds]);
+  }, [selectedLocation, maxPrice, minBeds, allProperties]);
+
+  // Load more results (show more from cache or fetch from API)
+  const handleLoadMore = useCallback(() => {
+    if (hasMore) {
+      // Show more from already fetched results
+      setDisplayCount(prev => Math.min(prev + LOAD_MORE_COUNT, allProperties.length));
+    } else if (canLoadMoreFromApi) {
+      // Fetch more from API
+      searchLiveProperties(true);
+    }
+  }, [hasMore, canLoadMoreFromApi, searchLiveProperties, allProperties.length]);
 
   // Analyze a property - navigate to analyze page with property data
   const handleAnalyze = (property: PropertyListing) => {
@@ -623,7 +660,7 @@ function DealsContent() {
                 Try Again
               </button>
             </div>
-          ) : liveProperties.length === 0 ? (
+          ) : allProperties.length === 0 ? (
             <div className="card text-center py-12 animate-fade-in">
               <Building className="h-12 w-12 text-gray-300 mx-auto mb-4" />
               <h3 className="text-lg font-medium text-gray-900">No properties found</h3>
@@ -644,30 +681,92 @@ function DealsContent() {
             </div>
           ) : (
             <div className="space-y-4 animate-fade-in">
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-gray-500">
-                  {liveProperties.length} live properties in {selectedLocation}
-                </p>
-                <div className="flex items-center gap-2 text-xs text-green-600">
-                  <Radio className="h-3 w-3" />
-                  <span>Live Data</span>
+              {/* Results Header with Sort */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <p className="text-sm text-gray-500">
+                    Showing {displayedProperties.length} of {allProperties.length} properties in {selectedLocation}
+                  </p>
+                  <div className="flex items-center gap-2 text-xs text-green-600">
+                    <Radio className="h-3 w-3" />
+                    <span>Live</span>
+                  </div>
+                </div>
+
+                {/* Sort Dropdown */}
+                <div className="flex items-center gap-2">
+                  <ArrowUpDown className="h-4 w-4 text-gray-400" />
+                  <select
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value)}
+                    className="text-sm border border-gray-200 rounded-md px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  >
+                    {SORT_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
+
+              {/* Property Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {liveProperties.map((property, index) => (
+                {displayedProperties.map((property, index) => (
                   <div
                     key={property.property_id}
                     className="animate-slide-up"
-                    style={{ animationDelay: `${index * 50}ms` }}
+                    style={{ animationDelay: `${Math.min(index, 5) * 50}ms` }}
                   >
                     <LivePropertyCard
                       property={property}
-                      incomeData={incomeByZip[property.zip_code]}
                       onAnalyze={() => handleAnalyze(property)}
                     />
                   </div>
                 ))}
               </div>
+
+              {/* Load More Button */}
+              {(hasMore || canLoadMoreFromApi) && (
+                <div className="flex justify-center pt-4">
+                  <button
+                    onClick={handleLoadMore}
+                    disabled={loadingMore}
+                    className="btn-outline flex items-center gap-2 px-6"
+                  >
+                    {loadingMore ? (
+                      <>
+                        <LoadingSpinner size="sm" />
+                        Loading...
+                      </>
+                    ) : (
+                      <>
+                        <ChevronDown className="h-4 w-4" />
+                        Load More
+                        {hasMore && (
+                          <span className="text-gray-400 text-sm">
+                            ({allProperties.length - displayCount} more cached)
+                          </span>
+                        )}
+                        {!hasMore && canLoadMoreFromApi && (
+                          <span className="text-gray-400 text-sm">
+                            (fetch from API)
+                          </span>
+                        )}
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
+
+              {/* End of results indicator */}
+              {!hasMore && !canLoadMoreFromApi && allProperties.length > 0 && (
+                <p className="text-center text-sm text-gray-400 pt-4">
+                  {allProperties.length >= MAX_RESULTS
+                    ? `Showing maximum ${MAX_RESULTS} results`
+                    : "All properties loaded"}
+                </p>
+              )}
             </div>
           )}
         </>

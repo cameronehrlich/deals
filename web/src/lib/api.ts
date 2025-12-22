@@ -296,6 +296,20 @@ export interface DatabaseStats {
   };
 }
 
+// Saved market from database
+export interface SavedMarket {
+  id: string;
+  name: string;
+  state: string;
+  metro?: string;
+  is_favorite: boolean;
+  is_supported: boolean;
+  api_support?: Record<string, boolean>;
+  overall_score: number;
+  cash_flow_score: number;
+  growth_score: number;
+}
+
 class ApiClient {
   private baseUrl: string;
 
@@ -562,6 +576,40 @@ class ApiClient {
 
   async getDatabaseStats(): Promise<DatabaseStats> {
     return this.fetch("/api/saved/stats");
+  }
+
+  // Saved Markets
+  async getSavedMarkets(params?: {
+    favorites_only?: boolean;
+    supported_only?: boolean;
+  }): Promise<SavedMarket[]> {
+    const searchParams = new URLSearchParams();
+    if (params?.favorites_only) searchParams.set("favorites_only", "true");
+    if (params?.supported_only !== undefined) searchParams.set("supported_only", params.supported_only.toString());
+
+    return this.fetch(`/api/saved/markets?${searchParams}`);
+  }
+
+  async getFavoriteMarkets(): Promise<SavedMarket[]> {
+    return this.fetch("/api/saved/markets/favorites");
+  }
+
+  async addMarket(params: {
+    name: string;
+    state: string;
+    metro?: string;
+    is_favorite?: boolean;
+  }): Promise<SavedMarket> {
+    return this.fetch("/api/saved/markets", {
+      method: "POST",
+      body: JSON.stringify(params),
+    });
+  }
+
+  async toggleMarketFavorite(marketId: string): Promise<SavedMarket> {
+    return this.fetch(`/api/saved/markets/${marketId}/favorite`, {
+      method: "POST",
+    });
   }
 }
 

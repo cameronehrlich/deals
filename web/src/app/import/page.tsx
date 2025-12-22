@@ -100,7 +100,12 @@ function AnalyzePageContent() {
       setError(null);
       setResult(null);
       setOfferPrice(null);
-      setLoadingStep("Analyzing property...");
+      setLoadingStep("Loading property details...");
+
+      // Simulate progress steps for visual feedback
+      const stepTimer1 = setTimeout(() => setLoadingStep("Getting rent estimates..."), 800);
+      const stepTimer2 = setTimeout(() => setLoadingStep("Analyzing market data..."), 1600);
+      const stepTimer3 = setTimeout(() => setLoadingStep("Calculating financials..."), 2400);
 
       const response = await api.importParsed({
         address: passedProperty.address,
@@ -117,6 +122,11 @@ function AnalyzePageContent() {
         down_payment_pct: parseFloat(downPaymentPct) / 100,
         interest_rate: parseFloat(interestRate) / 100,
       });
+
+      // Clear timers
+      clearTimeout(stepTimer1);
+      clearTimeout(stepTimer2);
+      clearTimeout(stepTimer3);
 
       setResult(response);
       if (response.deal?.property.list_price) {
