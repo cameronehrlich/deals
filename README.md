@@ -214,9 +214,300 @@ pytest tests/ --cov=src --cov-report=html
 | FRED | Macro data (mortgage rates, unemployment) | Implemented |
 | HUD Fair Market Rents | Rent baselines for 8 target markets | Implemented |
 | RentCast | Property-specific rent estimates | Implemented (with HUD fallback) |
-| URL Parser | Import from Zillow/Redfin/Realtor URLs | Implemented |
+| URL Parser | Import from Zillow/Redfin/Realtor URLs | Implemented (blocked by cloud IPs) |
+| **US Real Estate API** | **Live property listings & search** | **Phase 3 - In Progress** |
 | BLS | Employment data | Planned |
 | Census/ACS | Demographics | Planned |
+
+---
+
+## US Real Estate API Integration (Phase 3)
+
+### Overview
+
+The [US Real Estate API](https://rapidapi.com/datascraper/api/us-real-estate) on RapidAPI provides direct access to property listings from Zillow, Redfin, Realtor, and OpenDoor. This replaces the unreliable URL scraping approach which gets blocked by cloud provider IPs.
+
+### API Credentials
+
+```
+Provider: RapidAPI
+API: US Real Estate (by datascraper)
+Base URL: https://us-real-estate.p.rapidapi.com
+```
+
+**Environment Variables:**
+```bash
+RAPIDAPI_KEY=your_api_key_here          # Required
+RAPIDAPI_HOST=us-real-estate.p.rapidapi.com
+```
+
+### Rate Limits & Tiers
+
+| Tier | Price | Requests/Month | Cost/Request |
+|------|-------|----------------|--------------|
+| **Free** | $0 | **300** | - |
+| Pro | $9 | 5,000 | $0.002 |
+| Ultra | $29 | 40,000 | $0.0007 |
+| Mega | $99 | 200,000 | $0.0005 |
+
+**Current Tier: FREE (300 requests/month)**
+
+### Rate Limit Strategy
+
+Since we're on the free tier, we MUST be conservative:
+
+1. **Track Usage**: Store request count in localStorage (frontend) and environment/file (backend)
+2. **Cache Aggressively**: Cache all API responses for 24 hours minimum
+3. **UI Feedback**:
+   - Show remaining requests in UI header/footer
+   - Warning banner at 80% usage (240 requests)
+   - Error state at 100% with "Upgrade" CTA
+4. **Graceful Degradation**: Fall back to manual entry when limit hit
+5. **Batch Requests**: Prefer bulk endpoints over multiple single calls
+
+### Key Endpoints to Integrate
+
+#### Priority 1: Property Search (Core Feature)
+```
+GET /v3/for-sale
+Parameters:
+  - state_code: "IN", "OH", "TN", etc.
+  - city: "Indianapolis", "Cleveland", etc.
+  - offset: 0 (pagination)
+  - limit: 50 (max per request)
+  - price_min, price_max: Filter by price
+  - beds_min, baths_min: Filter by beds/baths
+  - property_type: "single_family", "multi_family", "condo", "townhouse"
+  - sort: "newest", "price_low", "price_high"
+
+Returns: Array of properties with address, price, beds, baths, sqft, photos, listing_id
+Cost: 1 request per search
+```
+
+#### Priority 2: Property Detail
+```
+GET /v3/property-detail
+Parameters:
+  - property_id: From search results
+
+Returns: Full property details including:
+  - Price history
+  - Tax history
+  - Property features
+  - Neighborhood info
+  - Schools nearby
+  - Similar homes
+
+Cost: 1 request per property
+```
+
+#### Priority 3: Home Value Estimate
+```
+GET /for-sale/home-estimate-value
+Parameters:
+  - property_id: From search or URL
+
+Returns: Estimated value (like Zestimate)
+Cost: 1 request
+```
+
+#### Priority 4: Rental Comps
+```
+GET /v3/for-rent
+Parameters:
+  - state_code, city, postal_code
+  - beds_min, beds_max
+  - price_min, price_max
+
+Returns: Active rental listings for rent estimate validation
+Cost: 1 request per search
+```
+
+#### Priority 5: Recently Sold (Market Analysis)
+```
+GET /sold-homes
+Parameters:
+  - state_code, city
+  - max_sold_days: 90 (last 3 months)
+
+Returns: Recent sales for market trend analysis
+Cost: 1 request per search
+```
+
+### Implementation Plan
+
+#### Backend: `src/data_sources/us_real_estate.py`
+
+```python
+class USRealEstateClient:
+    """
+    US Real Estate API client via RapidAPI.
+
+    Features:
+    - Request tracking and rate limit enforcement
+    - Response caching (24hr TTL)
+    - Graceful error handling
+    """
+
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self.base_url = "https://us-real-estate.p.rapidapi.com"
+        self.headers = {
+            "X-RapidAPI-Key": api_key,
+            "X-RapidAPI-Host": "us-real-estate.p.rapidapi.com"
+        }
+        self._request_count = 0
+        self._cache = {}  # In-memory cache, consider Redis for production
+
+    async def search_properties(
+        self,
+        city: str,
+        state_code: str,
+        max_price: int = None,
+        min_beds: int = None,
+        property_type: str = None,
+        limit: int = 20
+    ) -> list[Property]:
+        """Search for-sale properties in a market."""
+        pass
+
+    async def get_property_detail(self, property_id: str) -> PropertyDetail:
+        """Get full property details."""
+        pass
+
+    async def get_home_estimate(self, property_id: str) -> float:
+        """Get estimated home value."""
+        pass
+
+    async def search_rentals(
+        self,
+        city: str,
+        state_code: str,
+        beds: int = None
+    ) -> list[Rental]:
+        """Search rental listings for rent comps."""
+        pass
+
+    async def get_sold_homes(
+        self,
+        city: str,
+        state_code: str,
+        days: int = 90
+    ) -> list[SoldProperty]:
+        """Get recently sold properties."""
+        pass
+
+    def get_usage(self) -> dict:
+        """Return current usage stats."""
+        return {
+            "requests_used": self._request_count,
+            "requests_limit": 300,  # Free tier
+            "requests_remaining": 300 - self._request_count,
+            "percent_used": (self._request_count / 300) * 100
+        }
+```
+
+#### Backend: New API Endpoint
+
+```
+GET /api/properties/search
+Parameters:
+  - market: "indianapolis_in" (market ID)
+  - max_price: 300000
+  - min_beds: 3
+  - property_type: "single_family"
+  - limit: 20
+
+Response:
+{
+  "properties": [...],
+  "total_count": 150,
+  "api_usage": {
+    "requests_used": 45,
+    "requests_remaining": 255,
+    "warning": null | "Approaching limit" | "Limit reached"
+  }
+}
+```
+
+#### Frontend: UI Components
+
+1. **API Usage Indicator** (in Navigation or Footer)
+   ```
+   [====----] 45/300 API calls used
+   ```
+
+2. **Warning Banner** (at 80%+ usage)
+   ```
+   ⚠️ API limit almost reached (240/300). Upgrade for more searches.
+   ```
+
+3. **Limit Reached State**
+   ```
+   🚫 Monthly API limit reached. Use Calculator for manual analysis.
+   [Upgrade Plan] [Use Calculator]
+   ```
+
+4. **Property Search Page** (`/deals` enhancement)
+   - Replace mock data with live API results
+   - Show "Live Data" badge on API-sourced properties
+   - Loading states with "Searching properties..." feedback
+
+### Integration with Existing Features
+
+| Feature | Current | With US Real Estate API |
+|---------|---------|-------------------------|
+| **Deal Search** | Mock data only | Live property listings |
+| **Import URL** | Scraping (blocked on cloud) | API lookup by address |
+| **Property Detail** | Limited data | Full details, photos, history |
+| **Rent Estimate** | RentCast + HUD fallback | + Rental comps from API |
+| **Market Analysis** | Redfin Data Center stats | + Live sold data |
+
+### Caching Strategy
+
+```python
+CACHE_TTL = {
+    "property_search": 3600,      # 1 hour - listings change often
+    "property_detail": 86400,     # 24 hours - details stable
+    "home_estimate": 86400,       # 24 hours - estimates stable
+    "sold_homes": 86400,          # 24 hours - historical data
+    "rentals": 3600,              # 1 hour - rental market moves fast
+}
+```
+
+### Error Handling
+
+| Error | UI Response |
+|-------|-------------|
+| 429 Rate Limited | "API limit reached. Try again next month or upgrade." |
+| 401 Unauthorized | "API key invalid. Check configuration." |
+| 404 Not Found | "Property not found. Try a different search." |
+| 500 Server Error | "Service temporarily unavailable. Using cached data." |
+| Network Error | "Connection failed. Check your internet." |
+
+### Testing Strategy
+
+1. **Unit Tests**: Mock API responses, test parsing and caching
+2. **Integration Tests**: Use 5-10 requests from free tier for real API tests
+3. **E2E Tests**: Mock API at network level to avoid burning quota
+
+### Files to Create/Modify
+
+**New Files:**
+- `src/data_sources/us_real_estate.py` - API client
+- `api/routes/properties.py` - New search endpoint
+- `web/src/components/ApiUsageIndicator.tsx` - Usage UI
+- `tests/test_us_real_estate.py` - Tests
+
+**Modified Files:**
+- `src/data_sources/__init__.py` - Export new client
+- `src/data_sources/aggregator.py` - Integrate as data source
+- `api/main.py` - Register new router
+- `web/src/app/deals/page.tsx` - Use live API for search
+- `web/src/lib/api.ts` - Add new API methods
+- `web/src/components/Navigation.tsx` - Add usage indicator
+
+---
 
 ## Roadmap
 
@@ -224,8 +515,14 @@ pytest tests/ --cov=src --cov-report=html
 - [x] Phase 1.5: Web Application (FastAPI + Next.js)
 - [x] Phase 2: Real Data Sources (Redfin DC, FRED, HUD FMR, RentCast)
 - [x] Phase 2.5: URL-to-Deal Import (Zillow, Redfin, Realtor.com)
-- [ ] Phase 3: Alerting & Monitoring
-- [ ] Phase 4: PostgreSQL Persistence
+- [ ] **Phase 3: US Real Estate API Integration** ← Current
+  - [ ] Create `USRealEstateClient` with caching & rate limiting
+  - [ ] Add `/api/properties/search` endpoint
+  - [ ] Build API usage indicator component
+  - [ ] Integrate with Deal Search page
+  - [ ] Add warning/error states for rate limits
+- [ ] Phase 4: Alerting & Monitoring
+- [ ] Phase 5: PostgreSQL Persistence
 
 ## License
 
