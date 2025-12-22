@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   Calculator,
   DollarSign,
@@ -11,6 +12,8 @@ import {
   XCircle,
   RefreshCw,
   Zap,
+  Users,
+  MapPin,
 } from "lucide-react";
 import { api, AnalysisResult, MacroDataResponse } from "@/lib/api";
 import {
@@ -23,18 +26,41 @@ import {
 import { ScoreGauge } from "@/components/ScoreGauge";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 
-export default function CalculatorPage() {
+// Income affordability data type
+type IncomeAffordability = {
+  zip_code: string;
+  median_income: number;
+  income_tier: string;
+  monthly_income: number;
+  monthly_rent: number;
+  rent_to_income_pct: number;
+  affordable_rent: number;
+  is_affordable: boolean;
+  affordability_rating: string;
+};
+
+function CalculatorContent() {
+  const searchParams = useSearchParams();
+
+  // Get initial values from URL params or use defaults
+  const initialPrice = searchParams.get("price") || "200000";
+  const initialRent = searchParams.get("rent") || "1800";
+  const initialDown = searchParams.get("down") || "25";
+  const initialRate = searchParams.get("rate") || "7";
+  const initialZip = searchParams.get("zip") || "";
+
   // Inputs
-  const [purchasePrice, setPurchasePrice] = useState("200000");
-  const [monthlyRent, setMonthlyRent] = useState("1800");
-  const [downPaymentPct, setDownPaymentPct] = useState("25");
-  const [interestRate, setInterestRate] = useState("7");
+  const [purchasePrice, setPurchasePrice] = useState(initialPrice);
+  const [monthlyRent, setMonthlyRent] = useState(initialRent);
+  const [downPaymentPct, setDownPaymentPct] = useState(initialDown);
+  const [interestRate, setInterestRate] = useState(initialRate);
   const [propertyTaxRate, setPropertyTaxRate] = useState("1.2");
   const [insuranceRate, setInsuranceRate] = useState("0.5");
   const [vacancyRate, setVacancyRate] = useState("8");
   const [maintenanceRate, setMaintenanceRate] = useState("1");
   const [propertyManagementRate, setPropertyManagementRate] = useState("10");
   const [hoaMonthly, setHoaMonthly] = useState("0");
+  const [zipCode, setZipCode] = useState(initialZip);
 
   // State
   const [result, setResult] = useState<AnalysisResult | null>(null);
@@ -42,15 +68,17 @@ export default function CalculatorPage() {
   const [error, setError] = useState<string | null>(null);
   const [macroData, setMacroData] = useState<MacroDataResponse | null>(null);
   const [loadingRates, setLoadingRates] = useState(true);
+  const [incomeData, setIncomeData] = useState<IncomeAffordability | null>(null);
+  const [hasUrlParams] = useState(!!searchParams.get("price"));
 
-  // Fetch current market rates on load
+  // Fetch current market rates on load (but don't override URL params)
   useEffect(() => {
     async function fetchRates() {
       try {
         const data = await api.getMacroData();
         setMacroData(data);
-        // Auto-fill with current rate
-        if (data.mortgage_30yr) {
+        // Only auto-fill rate if not provided via URL
+        if (data.mortgage_30yr && !searchParams.get("rate")) {
           setInterestRate(data.mortgage_30yr.toFixed(2));
         }
       } catch (err) {
@@ -60,16 +88,26 @@ export default function CalculatorPage() {
       }
     }
     fetchRates();
-  }, []);
+  }, [searchParams]);
+
+  // Auto-calculate if values were passed from analyze page
+  useEffect(() => {
+    if (hasUrlParams && !result && !loading) {
+      calculate();
+    }
+  }, [hasUrlParams]);
 
   const calculate = async () => {
     try {
       setLoading(true);
       setError(null);
+      setIncomeData(null);
+
+      const rent = parseFloat(monthlyRent);
 
       const data = await api.calculateFinancials({
         purchase_price: parseFloat(purchasePrice),
-        monthly_rent: parseFloat(monthlyRent),
+        monthly_rent: rent,
         down_payment_pct: parseFloat(downPaymentPct) / 100,
         interest_rate: parseFloat(interestRate) / 100,
         property_tax_rate: parseFloat(propertyTaxRate) / 100,
@@ -81,6 +119,17 @@ export default function CalculatorPage() {
       });
 
       setResult(data);
+
+      // Fetch income affordability if zip code provided
+      if (zipCode && zipCode.length === 5) {
+        try {
+          const income = await api.getIncomeAffordability(zipCode, rent);
+          setIncomeData(income);
+        } catch (incomeErr) {
+          console.error("Failed to fetch income data:", incomeErr);
+          // Don't fail the whole calculation if income data fails
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Calculation failed");
     } finally {
@@ -91,6 +140,7 @@ export default function CalculatorPage() {
   const reset = () => {
     setResult(null);
     setError(null);
+    setIncomeData(null);
   };
 
   return (
@@ -146,6 +196,24 @@ export default function CalculatorPage() {
                   className="input"
                   min="0"
                 />
+              </div>
+
+              <div>
+                <label className="label flex items-center gap-2">
+                  <MapPin className="h-3.5 w-3.5 text-gray-400" />
+                  Zip Code (optional)
+                </label>
+                <input
+                  type="text"
+                  value={zipCode}
+                  onChange={(e) => setZipCode(e.target.value.replace(/\D/g, '').slice(0, 5))}
+                  className="input"
+                  placeholder="e.g. 33101"
+                  maxLength={5}
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  For income affordability analysis
+                </p>
               </div>
             </div>
           </div>
@@ -370,6 +438,95 @@ export default function CalculatorPage() {
                 </div>
               </div>
 
+              {/* Income Affordability */}
+              {incomeData && (
+                <div className={cn(
+                  "card border-l-4",
+                  incomeData.is_affordable ? "border-l-green-500" : "border-l-amber-500"
+                )}>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                    <Users className="h-5 w-5 text-primary-500" />
+                    Tenant Affordability Analysis
+                    <span className="text-sm font-normal text-gray-500">
+                      (ZIP {incomeData.zip_code})
+                    </span>
+                  </h3>
+
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                    <div>
+                      <p className="text-sm text-gray-500">Median Household Income</p>
+                      <p className="text-xl font-semibold">{formatCurrency(incomeData.median_income)}/yr</p>
+                      <span className={cn(
+                        "text-xs px-2 py-0.5 rounded-full capitalize",
+                        incomeData.income_tier === "high" ? "bg-green-100 text-green-700" :
+                        incomeData.income_tier === "middle" ? "bg-blue-100 text-blue-700" :
+                        incomeData.income_tier === "low-middle" ? "bg-amber-100 text-amber-700" :
+                        "bg-red-100 text-red-700"
+                      )}>
+                        {incomeData.income_tier} income area
+                      </span>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-500">Monthly Income</p>
+                      <p className="text-xl font-semibold">{formatCurrency(incomeData.monthly_income)}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-500">Rent-to-Income Ratio</p>
+                      <p className={cn(
+                        "text-xl font-semibold",
+                        incomeData.rent_to_income_pct <= 25 ? "text-green-600" :
+                        incomeData.rent_to_income_pct <= 30 ? "text-blue-600" :
+                        incomeData.rent_to_income_pct <= 40 ? "text-amber-600" :
+                        "text-red-600"
+                      )}>
+                        {incomeData.rent_to_income_pct.toFixed(1)}%
+                      </p>
+                      <span className={cn(
+                        "text-xs px-2 py-0.5 rounded-full capitalize",
+                        incomeData.affordability_rating === "excellent" ? "bg-green-100 text-green-700" :
+                        incomeData.affordability_rating === "good" ? "bg-blue-100 text-blue-700" :
+                        incomeData.affordability_rating === "fair" ? "bg-amber-100 text-amber-700" :
+                        "bg-red-100 text-red-700"
+                      )}>
+                        {incomeData.affordability_rating}
+                      </span>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-500">30% Affordable Rent</p>
+                      <p className="text-xl font-semibold">{formatCurrency(incomeData.affordable_rent)}/mo</p>
+                      <p className={cn(
+                        "text-xs mt-1",
+                        parseFloat(monthlyRent) <= incomeData.affordable_rent ? "text-green-600" : "text-amber-600"
+                      )}>
+                        {parseFloat(monthlyRent) <= incomeData.affordable_rent
+                          ? "Your rent is within affordable range"
+                          : `${formatCurrency(parseFloat(monthlyRent) - incomeData.affordable_rent)} above affordable`
+                        }
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className={cn(
+                    "p-3 rounded-lg text-sm",
+                    incomeData.is_affordable ? "bg-green-50 text-green-800" : "bg-amber-50 text-amber-800"
+                  )}>
+                    {incomeData.is_affordable ? (
+                      <p>
+                        <strong>Affordable:</strong> At {incomeData.rent_to_income_pct.toFixed(0)}% of median income,
+                        this rent is within the recommended 30% guideline for the area.
+                        Tenants should be able to afford this rent comfortably.
+                      </p>
+                    ) : (
+                      <p>
+                        <strong>Above Guideline:</strong> At {incomeData.rent_to_income_pct.toFixed(0)}% of median income,
+                        this rent exceeds the 30% affordability guideline.
+                        You may need to target higher-income tenants or expect longer vacancy periods.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* Financial Breakdown */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="card">
@@ -575,5 +732,18 @@ export default function CalculatorPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+// Wrapper with Suspense for useSearchParams
+export default function CalculatorPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center min-h-[400px]">
+        <LoadingSpinner size="lg" />
+      </div>
+    }>
+      <CalculatorContent />
+    </Suspense>
   );
 }

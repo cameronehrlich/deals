@@ -65,3 +65,6 @@ node_modules/
 .next/
 out/
 *.tsbuildinfo
+
+# API usage tracking files
+.api_usage*.json

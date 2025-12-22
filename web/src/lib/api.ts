@@ -177,6 +177,62 @@ export interface MacroDataResponse {
   updated: string;
 }
 
+// Real Estate Provider API Types
+export interface ApiUsage {
+  provider: string;
+  requests_used: number;
+  requests_limit: number;
+  requests_remaining: number;
+  percent_used: number;
+  warning: "approaching_limit" | "limit_reached" | null;
+  period: string;
+}
+
+export interface PropertyListing {
+  property_id: string;
+  address: string;
+  city: string;
+  state: string;
+  zip_code: string;
+  price: number;
+  bedrooms: number;
+  bathrooms: number;
+  sqft?: number;
+  property_type: string;
+  days_on_market?: number;
+  photos: string[];
+  source: string;
+  source_url?: string;
+  year_built?: number;
+  price_per_sqft?: number;
+}
+
+export interface PropertySearchResponse {
+  properties: PropertyListing[];
+  total: number;
+  api_usage: ApiUsage;
+}
+
+export interface PropertyDetailResponse extends PropertyListing {
+  lot_sqft?: number;
+  stories?: number;
+  description?: string;
+  features: string[];
+  price_history: Array<{ date: string; event: string; price: number }>;
+  tax_history: Array<{ year: number; tax: number; assessment?: number }>;
+  hoa_fee?: number;
+  annual_tax?: number;
+  api_usage: ApiUsage;
+}
+
+export interface LiveRentEstimate {
+  estimate: number;
+  low: number;
+  high: number;
+  comp_count: number;
+  source: string;
+}
+
 // Request for pre-parsed property data (from Electron local scraping)
 export interface ImportParsedRequest {
   address: string;
@@ -338,6 +394,74 @@ class ApiClient {
 
   async getMarketData(city: string, state: string): Promise<any> {
     return this.fetch(`/api/import/market-data/${encodeURIComponent(city)}/${encodeURIComponent(state)}`);
+  }
+
+  // Live Property Search (Real Estate Provider API)
+  async searchLiveProperties(params: {
+    location: string;  // "City, ST" format e.g. "Miami, FL"
+    max_price?: number;
+    min_price?: number;
+    min_beds?: number;
+    min_baths?: number;
+    property_type?: string;
+    limit?: number;
+  }): Promise<PropertySearchResponse> {
+    const searchParams = new URLSearchParams();
+    searchParams.set("location", params.location);
+    if (params.max_price) searchParams.set("max_price", params.max_price.toString());
+    if (params.min_price) searchParams.set("min_price", params.min_price.toString());
+    if (params.min_beds) searchParams.set("min_beds", params.min_beds.toString());
+    if (params.min_baths) searchParams.set("min_baths", params.min_baths.toString());
+    if (params.property_type) searchParams.set("property_type", params.property_type);
+    if (params.limit) searchParams.set("limit", params.limit.toString());
+
+    return this.fetch(`/api/properties/search?${searchParams}`);
+  }
+
+  async getPropertyDetail(propertyId: string): Promise<PropertyDetailResponse> {
+    return this.fetch(`/api/properties/detail/${propertyId}`);
+  }
+
+  async getLiveRentEstimate(params: {
+    city: string;
+    state: string;
+    bedrooms: number;
+  }): Promise<LiveRentEstimate> {
+    const searchParams = new URLSearchParams();
+    searchParams.set("city", params.city);
+    searchParams.set("state", params.state);
+    searchParams.set("bedrooms", params.bedrooms.toString());
+
+    return this.fetch(`/api/properties/rent-comps?${searchParams}`);
+  }
+
+  async getApiUsage(): Promise<ApiUsage> {
+    return this.fetch("/api/properties/usage");
+  }
+
+  // Income Data
+  async getIncomeData(zipCode: string): Promise<{
+    zip_code: string;
+    median_income: number;
+    income_tier: string;
+    monthly_income: number;
+    affordable_rent: number;
+  }> {
+    return this.fetch(`/api/import/income/${zipCode}`);
+  }
+
+  async getIncomeAffordability(zipCode: string, monthlyRent: number): Promise<{
+    zip_code: string;
+    median_income: number;
+    income_tier: string;
+    monthly_income: number;
+    monthly_rent: number;
+    rent_to_income_pct: number;
+    affordable_rent: number;
+    is_affordable: boolean;
+    affordability_rating: string;
+  }> {
+    return this.fetch(`/api/import/income/${zipCode}/affordability?monthly_rent=${monthlyRent}`);
   }
 }
 

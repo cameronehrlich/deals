@@ -193,6 +193,23 @@ export default function MarketDetailPage() {
               </span>
               <span className="font-semibold">{market.median_household_income ? formatCurrency(market.median_household_income) : "N/A"}</span>
             </div>
+            {market.median_household_income && (
+              <div className="flex items-center justify-between">
+                <span className="text-gray-600">Income Tier</span>
+                <span className={cn(
+                  "text-xs px-2 py-0.5 rounded-full",
+                  market.median_household_income >= 100000 ? "bg-green-100 text-green-700" :
+                  market.median_household_income >= 60000 ? "bg-blue-100 text-blue-700" :
+                  market.median_household_income >= 35000 ? "bg-amber-100 text-amber-700" :
+                  "bg-red-100 text-red-700"
+                )}>
+                  {market.median_household_income >= 100000 ? "High Income" :
+                   market.median_household_income >= 60000 ? "Middle Income" :
+                   market.median_household_income >= 35000 ? "Low-Middle Income" :
+                   "Low Income"}
+                </span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -317,6 +334,43 @@ export default function MarketDetailPage() {
                 {market.months_of_inventory ? `${market.months_of_inventory.toFixed(1)} mo` : "N/A"}
               </span>
             </div>
+            {market.median_rent && market.median_household_income && (() => {
+              const monthlyIncome = market.median_household_income / 12;
+              const rentToIncomeRatio = (market.median_rent / monthlyIncome) * 100;
+              const isAffordable = rentToIncomeRatio <= 30;
+              const affordableRent = monthlyIncome * 0.30;
+              return (
+                <>
+                  <div className="pt-3 border-t border-gray-100">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-gray-600">Rent-to-Income</span>
+                      <span className={cn(
+                        "font-semibold",
+                        rentToIncomeRatio <= 25 ? "text-green-600" :
+                        rentToIncomeRatio <= 30 ? "text-blue-600" :
+                        rentToIncomeRatio <= 40 ? "text-amber-600" :
+                        "text-red-600"
+                      )}>
+                        {rentToIncomeRatio.toFixed(1)}%
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-600">30% Affordable</span>
+                      <span className="font-semibold">{formatCurrency(affordableRent)}/mo</span>
+                    </div>
+                    <div className={cn(
+                      "mt-2 text-xs px-2 py-1 rounded text-center",
+                      isAffordable ? "bg-green-50 text-green-700" : "bg-amber-50 text-amber-700"
+                    )}>
+                      {isAffordable
+                        ? "Median rent is affordable for local households"
+                        : "Median rent exceeds 30% affordability guideline"
+                      }
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
           </div>
         </div>
 

@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useMemo, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Link2,
   ArrowRight,
@@ -17,8 +17,9 @@ import {
   Zap,
   Database,
   Monitor,
+  BarChart3,
 } from "lucide-react";
-import { api, ImportUrlResponse, Deal, MacroDataResponse } from "@/lib/api";
+import { api, ImportUrlResponse, Deal, MacroDataResponse, PropertyListing } from "@/lib/api";
 import {
   formatCurrency,
   formatPercent,
@@ -29,8 +30,10 @@ import { ScoreGauge } from "@/components/ScoreGauge";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { isElectron, scrapePropertyLocally } from "@/lib/electron";
 
-export default function ImportPage() {
+// Inner component that uses searchParams
+function AnalyzePageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   // Form state
   const [url, setUrl] = useState("");
@@ -53,10 +56,74 @@ export default function ImportPage() {
   // Electron detection state
   const [isElectronApp, setIsElectronApp] = useState(false);
 
+  // Property passed from search results
+  const [passedProperty, setPassedProperty] = useState<PropertyListing | null>(null);
+  const [autoAnalyzing, setAutoAnalyzing] = useState(false);
+
   // Check if running in Electron on mount
   useEffect(() => {
     setIsElectronApp(isElectron());
   }, []);
+
+  // Check for property data in URL params
+  useEffect(() => {
+    const propertyParam = searchParams.get("property");
+    if (propertyParam && !passedProperty && !result) {
+      try {
+        const property = JSON.parse(decodeURIComponent(propertyParam)) as PropertyListing;
+        setPassedProperty(property);
+      } catch (e) {
+        console.error("Failed to parse property data:", e);
+      }
+    }
+  }, [searchParams, passedProperty, result]);
+
+  // Auto-analyze when property is passed
+  useEffect(() => {
+    if (passedProperty && !result && !loading && !autoAnalyzing) {
+      analyzePassedProperty();
+    }
+  }, [passedProperty]);
+
+  const analyzePassedProperty = async () => {
+    if (!passedProperty) return;
+
+    try {
+      setAutoAnalyzing(true);
+      setLoading(true);
+      setError(null);
+      setResult(null);
+      setOfferPrice(null);
+      setLoadingStep("Analyzing property...");
+
+      const response = await api.importParsed({
+        address: passedProperty.address,
+        city: passedProperty.city,
+        state: passedProperty.state,
+        zip_code: passedProperty.zip_code,
+        list_price: passedProperty.price,
+        bedrooms: passedProperty.bedrooms,
+        bathrooms: passedProperty.bathrooms,
+        sqft: passedProperty.sqft || undefined,
+        property_type: passedProperty.property_type,
+        source: passedProperty.source,
+        source_url: passedProperty.source_url,
+        down_payment_pct: parseFloat(downPaymentPct) / 100,
+        interest_rate: parseFloat(interestRate) / 100,
+      });
+
+      setResult(response);
+      if (response.deal?.property.list_price) {
+        setOfferPrice(response.deal.property.list_price);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Analysis failed");
+    } finally {
+      setLoading(false);
+      setLoadingStep("");
+      setAutoAnalyzing(false);
+    }
+  };
 
   // Fetch current rates on load
   useEffect(() => {
@@ -158,6 +225,9 @@ export default function ImportPage() {
     setResult(null);
     setError(null);
     setOfferPrice(null);
+    setPassedProperty(null);
+    // Clear URL params
+    router.replace("/import");
   };
 
   // Calculate adjusted financials based on offer price
@@ -234,11 +304,14 @@ export default function ImportPage() {
       {/* Header */}
       <div>
         <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
-          <Link2 className="h-8 w-8 text-primary-600" />
-          Import Property
+          <BarChart3 className="h-8 w-8 text-primary-600" />
+          Analyze Property
         </h1>
         <p className="text-gray-500 mt-1">
-          Paste a Zillow, Redfin, or Realtor.com URL to analyze any property
+          {passedProperty
+            ? "Analyzing property from search results"
+            : "Paste a Zillow, Redfin, or Realtor.com URL to analyze any property"
+          }
         </p>
       </div>
 
@@ -657,10 +730,18 @@ export default function ImportPage() {
                   onClick={reset}
                   className="btn-outline"
                 >
-                  Import Another
+                  Analyze Another
                 </button>
                 <button
-                  onClick={() => router.push('/calculator')}
+                  onClick={() => {
+                    const params = new URLSearchParams();
+                    if (offerPrice) params.set('price', offerPrice.toString());
+                    if (result.deal?.property.estimated_rent) params.set('rent', result.deal.property.estimated_rent.toString());
+                    if (result.deal?.property.zip_code) params.set('zip', result.deal.property.zip_code);
+                    params.set('down', downPaymentPct);
+                    params.set('rate', interestRate);
+                    router.push(`/calculator?${params.toString()}`);
+                  }}
                   className="btn-primary"
                 >
                   Open in Calculator
@@ -738,5 +819,18 @@ export default function ImportPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+// Wrapper with Suspense for useSearchParams
+export default function ImportPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center min-h-[400px]">
+        <LoadingSpinner size="lg" />
+      </div>
+    }>
+      <AnalyzePageContent />
+    </Suspense>
   );
 }

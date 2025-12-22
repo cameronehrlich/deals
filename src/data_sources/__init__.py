@@ -7,6 +7,7 @@ Modules:
 - hud_fmr: HUD Fair Market Rents
 - rentcast: RentCast API for rent estimates
 - url_parser: Extract property data from Zillow/Redfin URLs
+- us_real_estate: US Real Estate API via RapidAPI (live listings)
 - aggregator: Combine multiple data sources
 """
 
@@ -15,6 +16,7 @@ from src.data_sources.fred import FredClient
 from src.data_sources.hud_fmr import HudFmrLoader
 from src.data_sources.rentcast import RentCastClient
 from src.data_sources.url_parser import PropertyUrlParser
+from src.data_sources.us_real_estate import USRealEstateClient
 from src.data_sources.aggregator import DataAggregator
 
 __all__ = [
@@ -23,5 +25,6 @@ __all__ = [
     "HudFmrLoader",
     "RentCastClient",
     "PropertyUrlParser",
+    "USRealEstateClient",
     "DataAggregator",
 ]

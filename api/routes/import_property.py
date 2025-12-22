@@ -408,6 +408,109 @@ async def get_macro_data():
         await aggregator.close()
 
 
+class IncomeDataResponse(BaseModel):
+    """Household income data for a zip code."""
+    zip_code: str
+    median_income: int
+    income_tier: str  # high, middle, low-middle, low
+    monthly_income: int
+    affordable_rent: int  # 30% of monthly income
+
+
+class IncomeAffordabilityResponse(BaseModel):
+    """Income-based rent affordability analysis."""
+    zip_code: str
+    median_income: int
+    income_tier: str
+    monthly_income: int
+    monthly_rent: float
+    rent_to_income_pct: float
+    affordable_rent: int
+    is_affordable: bool
+    affordability_rating: str  # excellent, good, fair, stretched, unaffordable
+
+
+@router.get("/income/{zip_code}", response_model=IncomeDataResponse)
+async def get_income_data(zip_code: str):
+    """
+    Get median household income for a zip code.
+
+    Uses Census data to provide income insights for investment analysis.
+    """
+    from src.data_sources.income_data import get_income_client
+
+    client = get_income_client()
+
+    try:
+        income = await client.get_income(zip_code)
+
+        if not income:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No income data available for zip code {zip_code}"
+            )
+
+        monthly_income = income.median_income // 12
+        affordable_rent = int(monthly_income * 0.30)
+
+        return IncomeDataResponse(
+            zip_code=income.zip_code,
+            median_income=income.median_income,
+            income_tier=income.income_tier,
+            monthly_income=monthly_income,
+            affordable_rent=affordable_rent,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/income/{zip_code}/affordability", response_model=IncomeAffordabilityResponse)
+async def get_income_affordability(
+    zip_code: str,
+    monthly_rent: float = Query(..., gt=0, description="Monthly rent amount"),
+):
+    """
+    Analyze rent affordability based on local income.
+
+    Returns whether the rent is affordable (<=30% of median income)
+    and provides an affordability rating.
+    """
+    from src.data_sources.income_data import get_income_client
+
+    client = get_income_client()
+
+    try:
+        income = await client.get_income(zip_code)
+
+        if not income:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No income data available for zip code {zip_code}"
+            )
+
+        affordability = income.rent_affordability(monthly_rent)
+
+        return IncomeAffordabilityResponse(
+            zip_code=income.zip_code,
+            median_income=income.median_income,
+            income_tier=income.income_tier,
+            monthly_income=affordability["monthly_income"],
+            monthly_rent=monthly_rent,
+            rent_to_income_pct=affordability["rent_to_income_pct"],
+            affordable_rent=affordability["affordable_rent"],
+            is_affordable=affordability["is_affordable"],
+            affordability_rating=affordability["affordability_rating"],
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/market-data/{city}/{state}")
 async def get_enriched_market_data(city: str, state: str):
     """
