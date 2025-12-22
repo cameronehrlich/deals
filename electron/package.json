@@ -22,13 +22,22 @@
     "mac": {
       "category": "public.app-category.finance",
       "icon": "assets/icon.icns",
-      "target": ["dmg", "zip"]
+      "target": [
+        "dmg",
+        "zip"
+      ]
     },
     "win": {
-      "target": ["nsis", "portable"]
+      "target": [
+        "nsis",
+        "portable"
+      ]
     },
     "linux": {
-      "target": ["AppImage", "deb"]
+      "target": [
+        "AppImage",
+        "deb"
+      ]
     },
     "files": [
       "main.js",
@@ -40,26 +49,32 @@
       {
         "from": "../web/.next/standalone",
         "to": "app",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "../web/.next/static",
         "to": "app/.next/static",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "../web/public",
         "to": "app/public",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ]
   },
   "dependencies": {
     "electron-store": "^8.1.0",
-    "puppeteer": "^21.6.1"
+    "puppeteer": "^24.34.0"
   },
   "devDependencies": {
-    "electron": "^28.1.0",
+    "electron": "^39.2.7",
     "electron-builder": "^24.9.1"
   }
 }
