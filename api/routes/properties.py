@@ -153,9 +153,15 @@ async def search_properties(
 
         usage = provider.get_usage()
 
+        # Filter out properties with missing required fields
+        valid_properties = [
+            p for p in properties
+            if p.address and p.city and p.state and p.zip_code
+        ]
+
         return PropertySearchResponse(
-            properties=[_listing_to_response(p) for p in properties],
-            total=len(properties),
+            properties=[_listing_to_response(p) for p in valid_properties],
+            total=len(valid_properties),
             api_usage=_usage_to_response(usage),
         )
 

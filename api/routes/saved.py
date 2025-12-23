@@ -891,11 +891,11 @@ async def reanalyze_property(property_id: str):
 
         # Update the property with new analysis data
         prop.estimated_rent = property_obj.estimated_rent
-        prop.overall_score = deal.score.overall if deal.score else None
-        prop.financial_score = deal.score.financial if deal.score else None
-        prop.market_score = deal.score.market if deal.score else None
-        prop.risk_score = deal.score.risk if deal.score else None
-        prop.liquidity_score = deal.score.liquidity if deal.score else None
+        prop.overall_score = deal.score.overall_score if deal.score else None
+        prop.financial_score = deal.score.financial_score if deal.score else None
+        prop.market_score = deal.score.market_score if deal.score else None
+        prop.risk_score = deal.score.risk_score if deal.score else None
+        prop.liquidity_score = deal.score.liquidity_score if deal.score else None
         prop.cash_flow = deal.financials.monthly_cash_flow if deal.financials else None
         prop.cash_on_cash = deal.financials.cash_on_cash_return if deal.financials else None
         prop.cap_rate = deal.financials.cap_rate if deal.financials else None
