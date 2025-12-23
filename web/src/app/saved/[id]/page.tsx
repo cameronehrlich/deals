@@ -147,6 +147,16 @@ export default function SavedPropertyDetailPage({
     fetchData();
   }, [propertyId]);
 
+  // Helper function to calculate mortgage payment
+  const calculateMortgagePayment = (principal: number, annualRate: number, years: number = 30) => {
+    if (principal <= 0) return 0;
+    const monthlyRate = annualRate / 12;
+    const numPayments = years * 12;
+    if (monthlyRate === 0) return principal / numPayments;
+    return principal * (monthlyRate * Math.pow(1 + monthlyRate, numPayments)) /
+      (Math.pow(1 + monthlyRate, numPayments) - 1);
+  };
+
   // Calculate adjusted financials based on offer price and financing inputs
   const adjustedFinancials = useMemo(() => {
     if (!savedProperty || offerPrice === null) return null;
@@ -163,19 +173,13 @@ export default function SavedPropertyDetailPage({
     const loanAmount = offerPrice - downPayment;
 
     // Monthly mortgage payment (P&I)
-    const monthlyRate = rate / 12;
-    const numPayments = 30 * 12;
-    const monthlyMortgage =
-      loanAmount > 0
-        ? loanAmount *
-          (monthlyRate * Math.pow(1 + monthlyRate, numPayments)) /
-          (Math.pow(1 + monthlyRate, numPayments) - 1)
-        : 0;
+    const monthlyMortgage = calculateMortgagePayment(loanAmount, rate);
 
     // Operating expenses (estimated)
     const monthlyTaxes = (offerPrice * 0.012) / 12;
     const monthlyInsurance = (offerPrice * 0.005) / 12;
-    const monthlyVacancy = monthlyRent * 0.08;
+    const vacancyRate = 0.08;
+    const monthlyVacancy = monthlyRent * vacancyRate;
     const monthlyMaintenance = (offerPrice * 0.01) / 12;
     const monthlyCapex = (offerPrice * 0.01) / 12;
     const monthlyPM = monthlyRent * 0.1;
@@ -215,6 +219,87 @@ export default function SavedPropertyDetailPage({
     const priceDiscount = (listPrice - offerPrice) / listPrice;
     const dealScore = Math.round(Math.min(100, originalScore + priceDiscount * 50));
 
+    // ===== STRESS TEST / SENSITIVITY ANALYSIS =====
+    // Helper to calculate cash flow with different params
+    const calcCashFlow = (customRate?: number, customVacancy?: number, customRent?: number) => {
+      const r = customRate !== undefined ? customRate : rate;
+      const v = customVacancy !== undefined ? customVacancy : vacancyRate;
+      const rent = customRent !== undefined ? customRent : monthlyRent;
+
+      const mortgage = calculateMortgagePayment(loanAmount, r);
+      const vacancy = rent * v;
+      const pm = rent * 0.1;
+
+      const expenses = mortgage + monthlyTaxes + monthlyInsurance + vacancy + monthlyMaintenance + monthlyCapex + pm;
+      return rent - expenses;
+    };
+
+    // Base case
+    const baseCashFlow = monthlyCashFlow;
+
+    // Rate stress scenarios
+    const rateIncrease1pct = calcCashFlow(rate + 0.01);
+    const rateIncrease2pct = calcCashFlow(rate + 0.02);
+
+    // Vacancy stress scenarios
+    const vacancy10pct = calcCashFlow(undefined, 0.10);
+    const vacancy15pct = calcCashFlow(undefined, 0.15);
+
+    // Rent decrease scenario
+    const rentDecrease5pct = calcCashFlow(undefined, undefined, monthlyRent * 0.95);
+
+    // Combined stress scenarios
+    const moderateStress = calcCashFlow(rate + 0.01, 0.10, monthlyRent * 0.97);
+    const severeStress = calcCashFlow(rate + 0.02, 0.15, monthlyRent * 0.90);
+
+    // Break-even calculations
+    // Break-even interest rate (binary search)
+    let breakEvenRate: number | null = null;
+    if (baseCashFlow > 0) {
+      let low = rate, high = rate + 0.20;
+      for (let i = 0; i < 20; i++) {
+        const mid = (low + high) / 2;
+        const cf = calcCashFlow(mid);
+        if (cf > 0) low = mid;
+        else high = mid;
+      }
+      breakEvenRate = (low + high) / 2;
+    }
+
+    // Break-even vacancy
+    let breakEvenVacancy: number | null = null;
+    if (baseCashFlow > 0) {
+      let low = vacancyRate, high = 1;
+      for (let i = 0; i < 20; i++) {
+        const mid = (low + high) / 2;
+        const cf = calcCashFlow(undefined, mid);
+        if (cf > 0) low = mid;
+        else high = mid;
+      }
+      breakEvenVacancy = (low + high) / 2;
+    }
+
+    // Break-even rent
+    let breakEvenRent: number | null = null;
+    if (baseCashFlow > 0 && monthlyRent > 0) {
+      let low = 0, high = monthlyRent;
+      for (let i = 0; i < 20; i++) {
+        const mid = (low + high) / 2;
+        const cf = calcCashFlow(undefined, undefined, mid);
+        if (cf > 0) high = mid;
+        else low = mid;
+      }
+      breakEvenRent = (low + high) / 2;
+    }
+
+    // Determine risk rating
+    let riskRating: 'low' | 'medium' | 'high' = 'low';
+    if (severeStress < -500 || baseCashFlow < 0) {
+      riskRating = 'high';
+    } else if (moderateStress < 0 || baseCashFlow < 200) {
+      riskRating = 'medium';
+    }
+
     return {
       monthlyCashFlow,
       annualCashFlow,
@@ -230,6 +315,23 @@ export default function SavedPropertyDetailPage({
       loanAmount,
       monthlyMortgage,
       closingCosts,
+      // Stress test results
+      sensitivity: {
+        baseCashFlow,
+        rateIncrease1pct,
+        rateIncrease2pct,
+        vacancy10pct,
+        vacancy15pct,
+        rentDecrease5pct,
+        moderateStress,
+        severeStress,
+        survivesModerate: moderateStress >= 0,
+        survivesSevere: severeStress >= 0,
+        breakEvenRate,
+        breakEvenVacancy,
+        breakEvenRent,
+        riskRating,
+      },
     };
   }, [savedProperty, offerPrice, downPaymentPct, interestRate]);
 
@@ -698,6 +800,138 @@ export default function SavedPropertyDetailPage({
                   <p className="font-semibold">{formatPercent(adjustedFinancials.breakEvenOccupancy)}</p>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Stress Test / Sensitivity Analysis */}
+          {adjustedFinancials?.sensitivity && (
+            <div className="card">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-yellow-500" />
+                Stress Test Results
+                <span className={cn(
+                  "ml-auto px-2 py-1 rounded text-sm font-medium capitalize",
+                  adjustedFinancials.sensitivity.riskRating === "low" ? "bg-green-100 text-green-700" :
+                  adjustedFinancials.sensitivity.riskRating === "medium" ? "bg-yellow-100 text-yellow-700" :
+                  "bg-red-100 text-red-700"
+                )}>
+                  {adjustedFinancials.sensitivity.riskRating} risk
+                </span>
+              </h3>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b">
+                      <th className="text-left py-2 px-3 font-medium text-gray-500">Scenario</th>
+                      <th className="text-right py-2 px-3 font-medium text-gray-500">Cash Flow</th>
+                      <th className="text-right py-2 px-3 font-medium text-gray-500">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr className="border-b">
+                      <td className="py-2 px-3">Base Case</td>
+                      <td className="py-2 px-3 text-right font-semibold">
+                        {formatCurrency(adjustedFinancials.sensitivity.baseCashFlow)}
+                      </td>
+                      <td className="py-2 px-3 text-right">
+                        <span className={adjustedFinancials.sensitivity.baseCashFlow >= 0 ? "badge-green" : "badge-red"}>
+                          {adjustedFinancials.sensitivity.baseCashFlow >= 0 ? "OK" : "Negative"}
+                        </span>
+                      </td>
+                    </tr>
+                    <tr className="border-b">
+                      <td className="py-2 px-3">Interest Rate +1%</td>
+                      <td className="py-2 px-3 text-right">{formatCurrency(adjustedFinancials.sensitivity.rateIncrease1pct)}</td>
+                      <td className="py-2 px-3 text-right">
+                        <span className={adjustedFinancials.sensitivity.rateIncrease1pct >= 0 ? "badge-green" : "badge-red"}>
+                          {adjustedFinancials.sensitivity.rateIncrease1pct >= 0 ? "OK" : "Negative"}
+                        </span>
+                      </td>
+                    </tr>
+                    <tr className="border-b">
+                      <td className="py-2 px-3">Interest Rate +2%</td>
+                      <td className="py-2 px-3 text-right">{formatCurrency(adjustedFinancials.sensitivity.rateIncrease2pct)}</td>
+                      <td className="py-2 px-3 text-right">
+                        <span className={adjustedFinancials.sensitivity.rateIncrease2pct >= 0 ? "badge-green" : "badge-red"}>
+                          {adjustedFinancials.sensitivity.rateIncrease2pct >= 0 ? "OK" : "Negative"}
+                        </span>
+                      </td>
+                    </tr>
+                    <tr className="border-b">
+                      <td className="py-2 px-3">Vacancy 10%</td>
+                      <td className="py-2 px-3 text-right">{formatCurrency(adjustedFinancials.sensitivity.vacancy10pct)}</td>
+                      <td className="py-2 px-3 text-right">
+                        <span className={adjustedFinancials.sensitivity.vacancy10pct >= 0 ? "badge-green" : "badge-red"}>
+                          {adjustedFinancials.sensitivity.vacancy10pct >= 0 ? "OK" : "Negative"}
+                        </span>
+                      </td>
+                    </tr>
+                    <tr className="border-b">
+                      <td className="py-2 px-3">Vacancy 15%</td>
+                      <td className="py-2 px-3 text-right">{formatCurrency(adjustedFinancials.sensitivity.vacancy15pct)}</td>
+                      <td className="py-2 px-3 text-right">
+                        <span className={adjustedFinancials.sensitivity.vacancy15pct >= 0 ? "badge-green" : "badge-red"}>
+                          {adjustedFinancials.sensitivity.vacancy15pct >= 0 ? "OK" : "Negative"}
+                        </span>
+                      </td>
+                    </tr>
+                    <tr className="border-b">
+                      <td className="py-2 px-3">Rent -5%</td>
+                      <td className="py-2 px-3 text-right">{formatCurrency(adjustedFinancials.sensitivity.rentDecrease5pct)}</td>
+                      <td className="py-2 px-3 text-right">
+                        <span className={adjustedFinancials.sensitivity.rentDecrease5pct >= 0 ? "badge-green" : "badge-red"}>
+                          {adjustedFinancials.sensitivity.rentDecrease5pct >= 0 ? "OK" : "Negative"}
+                        </span>
+                      </td>
+                    </tr>
+                    <tr className="border-b bg-yellow-50">
+                      <td className="py-2 px-3 font-medium">Moderate Stress</td>
+                      <td className="py-2 px-3 text-right font-semibold">{formatCurrency(adjustedFinancials.sensitivity.moderateStress)}</td>
+                      <td className="py-2 px-3 text-right">
+                        <span className={adjustedFinancials.sensitivity.survivesModerate ? "badge-green" : "badge-red"}>
+                          {adjustedFinancials.sensitivity.survivesModerate ? "Survives" : "Fails"}
+                        </span>
+                      </td>
+                    </tr>
+                    <tr className="bg-red-50">
+                      <td className="py-2 px-3 font-medium">Severe Stress</td>
+                      <td className="py-2 px-3 text-right font-semibold">{formatCurrency(adjustedFinancials.sensitivity.severeStress)}</td>
+                      <td className="py-2 px-3 text-right">
+                        <span className={adjustedFinancials.sensitivity.survivesSevere ? "badge-green" : "badge-red"}>
+                          {adjustedFinancials.sensitivity.survivesSevere ? "Survives" : "Fails"}
+                        </span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Break-even points */}
+              <div className="mt-4 pt-4 border-t grid grid-cols-3 gap-4 text-center">
+                {adjustedFinancials.sensitivity.breakEvenRate && (
+                  <div>
+                    <p className="text-sm text-gray-500">Break-even Rate</p>
+                    <p className="font-semibold">{formatPercent(adjustedFinancials.sensitivity.breakEvenRate)}</p>
+                  </div>
+                )}
+                {adjustedFinancials.sensitivity.breakEvenVacancy && (
+                  <div>
+                    <p className="text-sm text-gray-500">Break-even Vacancy</p>
+                    <p className="font-semibold">{formatPercent(adjustedFinancials.sensitivity.breakEvenVacancy)}</p>
+                  </div>
+                )}
+                {adjustedFinancials.sensitivity.breakEvenRent && (
+                  <div>
+                    <p className="text-sm text-gray-500">Break-even Rent</p>
+                    <p className="font-semibold">{formatCurrency(adjustedFinancials.sensitivity.breakEvenRent)}/mo</p>
+                  </div>
+                )}
+              </div>
+
+              <p className="text-xs text-gray-500 mt-4">
+                <strong>Moderate stress:</strong> +1% rate, 10% vacancy, -3% rent | <strong>Severe stress:</strong> +2% rate, 15% vacancy, -10% rent
+              </p>
             </div>
           )}
 

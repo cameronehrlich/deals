@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import {
   Bookmark,
@@ -10,11 +10,27 @@ import {
   BarChart3,
   ExternalLink,
   Building,
+  ArrowUpDown,
+  Filter,
+  X,
+  ChevronDown,
 } from "lucide-react";
 import { api, SavedProperty } from "@/lib/api";
 import { LoadingPage } from "@/components/LoadingSpinner";
 import { cn, formatCurrency, formatPercent } from "@/lib/utils";
 import { ScoreGauge } from "@/components/ScoreGauge";
+
+// Sort options
+type SortOption = "score_desc" | "price_asc" | "price_desc" | "cash_flow_desc" | "date_desc" | "city_asc";
+
+const SORT_OPTIONS: { value: SortOption; label: string }[] = [
+  { value: "score_desc", label: "Score (High to Low)" },
+  { value: "cash_flow_desc", label: "Cash Flow (High to Low)" },
+  { value: "price_asc", label: "Price (Low to High)" },
+  { value: "price_desc", label: "Price (High to Low)" },
+  { value: "date_desc", label: "Recently Saved" },
+  { value: "city_asc", label: "City (A-Z)" },
+];
 
 // Saved property card
 function SavedPropertyCard({
@@ -158,6 +174,62 @@ export default function SavedPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Filter & Sort state
+  const [sortBy, setSortBy] = useState<SortOption>("score_desc");
+  const [filterCity, setFilterCity] = useState<string>("");
+  const [filterFavoritesOnly, setFilterFavoritesOnly] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+
+  // Get unique cities from saved properties
+  const uniqueCities = useMemo(() => {
+    const cities = new Set(savedProperties.map(p => `${p.city}, ${p.state}`));
+    return Array.from(cities).sort();
+  }, [savedProperties]);
+
+  // Filter and sort properties
+  const filteredAndSortedProperties = useMemo(() => {
+    let result = [...savedProperties];
+
+    // Apply filters
+    if (filterCity) {
+      result = result.filter(p => `${p.city}, ${p.state}` === filterCity);
+    }
+    if (filterFavoritesOnly) {
+      result = result.filter(p => p.is_favorite);
+    }
+
+    // Apply sort
+    result.sort((a, b) => {
+      switch (sortBy) {
+        case "score_desc":
+          return (b.overall_score || 0) - (a.overall_score || 0);
+        case "price_asc":
+          return (a.list_price || 0) - (b.list_price || 0);
+        case "price_desc":
+          return (b.list_price || 0) - (a.list_price || 0);
+        case "cash_flow_desc":
+          return (b.cash_flow || 0) - (a.cash_flow || 0);
+        case "date_desc":
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        case "city_asc":
+          return `${a.city}, ${a.state}`.localeCompare(`${b.city}, ${b.state}`);
+        default:
+          return 0;
+      }
+    });
+
+    return result;
+  }, [savedProperties, sortBy, filterCity, filterFavoritesOnly]);
+
+  // Active filter count
+  const activeFilterCount = (filterCity ? 1 : 0) + (filterFavoritesOnly ? 1 : 0);
+
+  // Clear all filters
+  const clearFilters = () => {
+    setFilterCity("");
+    setFilterFavoritesOnly(false);
+  };
+
   // Fetch saved properties
   const fetchSavedProperties = useCallback(async () => {
     try {
@@ -238,27 +310,127 @@ export default function SavedPage() {
         <SavedPropertiesEmpty />
       ) : (
         <div className="space-y-4 animate-fade-in">
-          <div className="flex items-center justify-between">
+          {/* Sort & Filter Controls */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <p className="text-sm text-gray-500">
-              {savedProperties.length} saved {savedProperties.length === 1 ? "property" : "properties"}
+              {filteredAndSortedProperties.length === savedProperties.length
+                ? `${savedProperties.length} saved ${savedProperties.length === 1 ? "property" : "properties"}`
+                : `Showing ${filteredAndSortedProperties.length} of ${savedProperties.length} properties`}
             </p>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {savedProperties.map((property, index) => (
-              <div
-                key={property.id}
-                className="animate-slide-up"
-                style={{ animationDelay: `${index * 50}ms` }}
-              >
-                <SavedPropertyCard
-                  property={property}
-                  onDelete={() => handleDeleteProperty(property.id)}
-                  onToggleFavorite={() => handleToggleFavorite(property.id)}
-                  onViewAnalysis={() => handleViewSavedAnalysis(property.id)}
-                />
+
+            <div className="flex items-center gap-2">
+              {/* Sort Dropdown */}
+              <div className="relative">
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as SortOption)}
+                  className="appearance-none bg-white border border-gray-300 rounded-lg px-3 py-2 pr-8 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent cursor-pointer"
+                >
+                  {SORT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
               </div>
-            ))}
+
+              {/* Filter Toggle */}
+              <button
+                onClick={() => setShowFilters(!showFilters)}
+                className={cn(
+                  "btn-outline text-sm flex items-center gap-2",
+                  showFilters && "bg-primary-50 border-primary-300"
+                )}
+              >
+                <Filter className="h-4 w-4" />
+                Filters
+                {activeFilterCount > 0 && (
+                  <span className="bg-primary-600 text-white text-xs rounded-full px-1.5 py-0.5 min-w-[20px] text-center">
+                    {activeFilterCount}
+                  </span>
+                )}
+              </button>
+            </div>
           </div>
+
+          {/* Filter Panel */}
+          {showFilters && (
+            <div className="card bg-gray-50 p-4">
+              <div className="flex flex-wrap items-center gap-4">
+                {/* City Filter */}
+                <div className="flex items-center gap-2">
+                  <label className="text-sm text-gray-600">City:</label>
+                  <select
+                    value={filterCity}
+                    onChange={(e) => setFilterCity(e.target.value)}
+                    className="bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  >
+                    <option value="">All Cities</option>
+                    {uniqueCities.map((city) => (
+                      <option key={city} value={city}>
+                        {city}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Favorites Only */}
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={filterFavoritesOnly}
+                    onChange={(e) => setFilterFavoritesOnly(e.target.checked)}
+                    className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                  />
+                  <span className="text-sm text-gray-600 flex items-center gap-1">
+                    <Star className="h-4 w-4 text-yellow-500" />
+                    Favorites only
+                  </span>
+                </label>
+
+                {/* Clear Filters */}
+                {activeFilterCount > 0 && (
+                  <button
+                    onClick={clearFilters}
+                    className="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1 ml-auto"
+                  >
+                    <X className="h-4 w-4" />
+                    Clear filters
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Property Grid */}
+          {filteredAndSortedProperties.length === 0 ? (
+            <div className="card text-center py-12">
+              <Filter className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-gray-900">No matching properties</h3>
+              <p className="text-gray-500 mt-1">Try adjusting your filters</p>
+              <button onClick={clearFilters} className="btn-primary mt-4">
+                Clear Filters
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredAndSortedProperties.map((property, index) => (
+                <div
+                  key={property.id}
+                  className="animate-slide-up"
+                  style={{ animationDelay: `${index * 50}ms` }}
+                >
+                  <SavedPropertyCard
+                    property={property}
+                    onDelete={() => handleDeleteProperty(property.id)}
+                    onToggleFavorite={() => handleToggleFavorite(property.id)}
+                    onViewAnalysis={() => handleViewSavedAnalysis(property.id)}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
