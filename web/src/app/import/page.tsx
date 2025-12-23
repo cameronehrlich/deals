@@ -254,41 +254,29 @@ function AnalyzePageContent() {
     try {
       setSaving(true);
 
-      // Get property data from the result or passed property
-      const property = passedProperty || {
+      // Use the new direct save endpoint - no re-analysis needed!
+      const savedProperty = await api.saveProperty({
         address: result.deal.property.address,
         city: result.deal.property.city,
         state: result.deal.property.state,
         zip_code: result.deal.property.zip_code,
-        price: result.deal.property.list_price,
+        list_price: result.deal.property.list_price,
+        estimated_rent: result.deal.property.estimated_rent,
         bedrooms: result.deal.property.bedrooms,
         bathrooms: result.deal.property.bathrooms,
         sqft: result.deal.property.sqft,
         property_type: result.deal.property.property_type,
         source: result.source || "manual",
-        source_url: url || undefined,
-      };
-
-      // Re-analyze with save=true
-      const response = await api.importParsed({
-        address: property.address,
-        city: property.city,
-        state: property.state,
-        zip_code: property.zip_code,
-        list_price: property.price || result.deal.property.list_price,
-        bedrooms: property.bedrooms,
-        bathrooms: property.bathrooms,
-        sqft: property.sqft || undefined,
-        property_type: property.property_type,
-        source: property.source,
-        source_url: property.source_url,
-        down_payment_pct: parseFloat(downPaymentPct) / 100,
-        interest_rate: parseFloat(interestRate) / 100,
-        save: true,
+        source_url: passedProperty?.source_url || url || undefined,
+        // Include pre-calculated financial metrics
+        overall_score: result.deal.score?.overall_score,
+        cash_flow: result.deal.financials?.monthly_cash_flow,
+        cash_on_cash: result.deal.financials?.cash_on_cash_return,
+        cap_rate: result.deal.financials?.cap_rate,
       });
 
-      if (response.saved_id) {
-        setSavedId(response.saved_id);
+      if (savedProperty?.id) {
+        setSavedId(savedProperty.id);
       }
     } catch (err) {
       console.error("Failed to save property:", err);

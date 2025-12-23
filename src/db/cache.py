@@ -18,6 +18,11 @@ CACHE_TTL = {
     "income": 8760,        # Income data - 1 year (census data)
     "macro": 1,            # Macro rates - 1 hour
     "rent_estimate": 24,   # Rent estimates - 24 hours
+    "walkscore": 720,      # Walk Score - 30 days (rarely changes)
+    "noise_score": 720,    # Noise Score - 30 days (rarely changes)
+    "schools": 168,        # Nearby schools - 1 week
+    "flood": 8760,         # FEMA flood zones - 1 year (rarely changes)
+    "location_insights": 168,  # Combined location data - 1 week
 }
 
 

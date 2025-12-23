@@ -14,28 +14,32 @@ import {
   ChevronRight,
   Loader2,
   X,
+  Trash2,
 } from "lucide-react";
-import { api, SavedMarket } from "@/lib/api";
+import { api, SavedMarket, MetroSuggestion } from "@/lib/api";
 import { LoadingPage, LoadingSpinner } from "@/components/LoadingSpinner";
 import { ScoreGauge } from "@/components/ScoreGauge";
 import { cn, formatCurrency, getScoreBadge } from "@/lib/utils";
 
-// US States for the dropdown
-const US_STATES = [
-  "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
-  "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
-  "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
-  "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
-  "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY"
-];
+// Debounce hook for search
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+  useEffect(() => {
+    const handler = setTimeout(() => setDebouncedValue(value), delay);
+    return () => clearTimeout(handler);
+  }, [value, delay]);
+  return debouncedValue;
+}
 
 // Compact market card for favorites
 function FavoriteMarketCard({
   market,
   onToggleFavorite,
+  onDelete,
 }: {
   market: SavedMarket;
   onToggleFavorite: () => void;
+  onDelete: () => void;
 }) {
   return (
     <div className="card hover:shadow-lg transition-all group">
@@ -63,16 +67,30 @@ function FavoriteMarketCard({
 
         <div className="flex flex-col items-end gap-2">
           <ScoreGauge score={market.overall_score} label="" size="sm" />
-          <button
-            onClick={(e) => {
-              e.preventDefault();
-              onToggleFavorite();
-            }}
-            className="p-1.5 rounded-full hover:bg-yellow-50 transition-colors"
-            title="Remove from favorites"
-          >
-            <Star className="h-4 w-4 text-yellow-500 fill-current" />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={(e) => {
+                e.preventDefault();
+                onToggleFavorite();
+              }}
+              className="p-1.5 rounded-full hover:bg-yellow-50 transition-colors"
+              title="Remove from favorites"
+            >
+              <Star className="h-4 w-4 text-yellow-500 fill-current" />
+            </button>
+            <button
+              onClick={(e) => {
+                e.preventDefault();
+                if (confirm(`Delete ${market.name}, ${market.state}? This cannot be undone.`)) {
+                  onDelete();
+                }
+              }}
+              className="p-1.5 rounded-full hover:bg-red-50 transition-colors opacity-0 group-hover:opacity-100"
+              title="Delete market"
+            >
+              <Trash2 className="h-4 w-4 text-red-400 hover:text-red-600" />
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -83,9 +101,11 @@ function FavoriteMarketCard({
 function ExploreMarketCard({
   market,
   onToggleFavorite,
+  onDelete,
 }: {
   market: SavedMarket;
   onToggleFavorite: () => void;
+  onDelete: () => void;
 }) {
   return (
     <div className="card hover:shadow-lg transition-all group">
@@ -124,30 +144,44 @@ function ExploreMarketCard({
           </div>
         </Link>
 
-        <button
-          onClick={(e) => {
-            e.preventDefault();
-            onToggleFavorite();
-          }}
-          className={cn(
-            "p-2 rounded-full transition-colors",
-            market.is_favorite
-              ? "bg-yellow-50 hover:bg-yellow-100"
-              : "hover:bg-gray-100"
-          )}
-          title={market.is_favorite ? "Remove from favorites" : "Add to favorites"}
-        >
-          <Star className={cn(
-            "h-5 w-5",
-            market.is_favorite ? "text-yellow-500 fill-current" : "text-gray-300"
-          )} />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={(e) => {
+              e.preventDefault();
+              onToggleFavorite();
+            }}
+            className={cn(
+              "p-2 rounded-full transition-colors",
+              market.is_favorite
+                ? "bg-yellow-50 hover:bg-yellow-100"
+                : "hover:bg-gray-100"
+            )}
+            title={market.is_favorite ? "Remove from favorites" : "Add to favorites"}
+          >
+            <Star className={cn(
+              "h-5 w-5",
+              market.is_favorite ? "text-yellow-500 fill-current" : "text-gray-300"
+            )} />
+          </button>
+          <button
+            onClick={(e) => {
+              e.preventDefault();
+              if (confirm(`Delete ${market.name}, ${market.state}? This cannot be undone.`)) {
+                onDelete();
+              }
+            }}
+            className="p-2 rounded-full hover:bg-red-50 transition-colors opacity-0 group-hover:opacity-100"
+            title="Delete market"
+          >
+            <Trash2 className="h-5 w-5 text-red-400 hover:text-red-600" />
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
-// Add market modal
+// Add market modal with autocomplete
 function AddMarketModal({
   isOpen,
   onClose,
@@ -157,24 +191,53 @@ function AddMarketModal({
   onClose: () => void;
   onAdd: (name: string, state: string, metro?: string) => Promise<void>;
 }) {
-  const [name, setName] = useState("");
-  const [state, setState] = useState("TX");
-  const [metro, setMetro] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [suggestions, setSuggestions] = useState<MetroSuggestion[]>([]);
+  const [selectedMetro, setSelectedMetro] = useState<MetroSuggestion | null>(null);
+  const [searching, setSearching] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name.trim()) return;
+  const debouncedQuery = useDebounce(searchQuery, 300);
+
+  // Search for metros when query changes
+  useEffect(() => {
+    if (debouncedQuery.length >= 2) {
+      setSearching(true);
+      api.searchMetros(debouncedQuery)
+        .then(setSuggestions)
+        .catch(console.error)
+        .finally(() => setSearching(false));
+    } else {
+      setSuggestions([]);
+    }
+  }, [debouncedQuery]);
+
+  const handleSelectMetro = (metro: MetroSuggestion) => {
+    setSelectedMetro(metro);
+    setSearchQuery(metro.name);
+    setShowSuggestions(false);
+  };
+
+  const handleSubmit = async () => {
+    if (!selectedMetro) return;
 
     try {
       setAdding(true);
-      await onAdd(name.trim(), state, metro.trim() || undefined);
-      setName("");
-      setMetro("");
+      await onAdd(selectedMetro.name, selectedMetro.state, selectedMetro.metro);
+      setSearchQuery("");
+      setSelectedMetro(null);
       onClose();
     } finally {
       setAdding(false);
     }
+  };
+
+  const handleClose = () => {
+    setSearchQuery("");
+    setSelectedMetro(null);
+    setSuggestions([]);
+    onClose();
   };
 
   if (!isOpen) return null;
@@ -184,59 +247,115 @@ function AddMarketModal({
       <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 animate-fade-in">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold text-gray-900">Add New Market</h3>
-          <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded">
+          <button onClick={handleClose} className="p-1 hover:bg-gray-100 rounded">
             <X className="h-5 w-5 text-gray-500" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="label">City Name *</label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Dallas"
-              className="input"
-              required
-            />
+        <div className="space-y-4">
+          {/* Search input */}
+          <div className="relative">
+            <label className="label">Search Markets</label>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setSelectedMetro(null);
+                  setShowSuggestions(true);
+                }}
+                onFocus={() => setShowSuggestions(true)}
+                placeholder="Type to search metros (e.g. Dallas, Phoenix)..."
+                className="input pl-10"
+                autoFocus
+              />
+              {searching && (
+                <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 animate-spin" />
+              )}
+            </div>
+
+            {/* Suggestions dropdown */}
+            {showSuggestions && suggestions.length > 0 && !selectedMetro && (
+              <div className="absolute z-10 w-full mt-1 bg-white rounded-lg shadow-lg border border-gray-200 max-h-64 overflow-auto">
+                {suggestions.map((metro, idx) => (
+                  <button
+                    key={`${metro.name}-${metro.state}-${idx}`}
+                    type="button"
+                    onClick={() => handleSelectMetro(metro)}
+                    className="w-full px-4 py-3 text-left hover:bg-gray-50 flex items-start gap-3 border-b border-gray-100 last:border-b-0"
+                  >
+                    <MapPin className="h-4 w-4 text-gray-400 mt-0.5 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-gray-900">
+                        {metro.name}, {metro.state}
+                      </div>
+                      <div className="text-sm text-gray-500 truncate">
+                        {metro.metro}
+                      </div>
+                      {metro.median_price && (
+                        <div className="text-xs text-gray-400 mt-1">
+                          Median price: {formatCurrency(metro.median_price)}
+                        </div>
+                      )}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* No results message */}
+            {showSuggestions && searchQuery.length >= 2 && !searching && suggestions.length === 0 && (
+              <div className="absolute z-10 w-full mt-1 bg-white rounded-lg shadow-lg border border-gray-200 p-4 text-center text-gray-500">
+                No markets found for "{searchQuery}"
+              </div>
+            )}
           </div>
 
-          <div>
-            <label className="label">State *</label>
-            <select
-              value={state}
-              onChange={(e) => setState(e.target.value)}
-              className="input"
-            >
-              {US_STATES.map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
-          </div>
+          {/* Selected metro display */}
+          {selectedMetro && (
+            <div className="p-4 bg-primary-50 rounded-lg border border-primary-200">
+              <div className="flex items-start justify-between">
+                <div>
+                  <div className="font-semibold text-primary-900">
+                    {selectedMetro.name}, {selectedMetro.state}
+                  </div>
+                  <div className="text-sm text-primary-700 mt-1">
+                    {selectedMetro.metro}
+                  </div>
+                  {selectedMetro.median_price && (
+                    <div className="text-sm text-primary-600 mt-2">
+                      Median price: {formatCurrency(selectedMetro.median_price)}
+                    </div>
+                  )}
+                </div>
+                <button
+                  onClick={() => {
+                    setSelectedMetro(null);
+                    setSearchQuery("");
+                  }}
+                  className="p-1 hover:bg-primary-100 rounded text-primary-600"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          )}
 
-          <div>
-            <label className="label">Metro Area (optional)</label>
-            <input
-              type="text"
-              value={metro}
-              onChange={(e) => setMetro(e.target.value)}
-              placeholder="e.g. Dallas-Fort Worth-Arlington"
-              className="input"
-            />
-          </div>
-
+          {/* Action buttons */}
           <div className="flex gap-3 pt-2">
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleClose}
               className="btn-outline flex-1"
             >
               Cancel
             </button>
             <button
-              type="submit"
-              disabled={!name.trim() || adding}
+              type="button"
+              onClick={handleSubmit}
+              disabled={!selectedMetro || adding}
               className="btn-primary flex-1 flex items-center justify-center gap-2"
             >
               {adding ? (
@@ -252,7 +371,11 @@ function AddMarketModal({
               )}
             </button>
           </div>
-        </form>
+
+          <p className="text-xs text-gray-500 text-center">
+            Market data will be automatically fetched when added
+          </p>
+        </div>
       </div>
     </div>
   );
@@ -325,6 +448,19 @@ export default function MarketsPage() {
 
     setFavoriteMarkets(prev => [...prev, newMarket]);
     setAllMarkets(prev => [...prev, newMarket]);
+  };
+
+  // Delete market
+  const handleDeleteMarket = async (marketId: string) => {
+    try {
+      await api.deleteMarket(marketId);
+      // Remove from both lists
+      setFavoriteMarkets(prev => prev.filter(m => m.id !== marketId));
+      setAllMarkets(prev => prev.filter(m => m.id !== marketId));
+    } catch (err) {
+      console.error("Failed to delete market:", err);
+      alert("Failed to delete market. Please try again.");
+    }
   };
 
   // Filter markets by search
@@ -400,6 +536,7 @@ export default function MarketsPage() {
                 <FavoriteMarketCard
                   market={market}
                   onToggleFavorite={() => handleToggleFavorite(market.id)}
+                  onDelete={() => handleDeleteMarket(market.id)}
                 />
               </div>
             ))}
@@ -469,6 +606,7 @@ export default function MarketsPage() {
                 <ExploreMarketCard
                   market={market}
                   onToggleFavorite={() => handleToggleFavorite(market.id)}
+                  onDelete={() => handleDeleteMarket(market.id)}
                 />
               </div>
             ))}

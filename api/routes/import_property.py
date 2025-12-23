@@ -581,3 +581,391 @@ async def get_enriched_market_data(city: str, state: str):
 
     finally:
         await aggregator.close()
+
+
+class WalkScoreResponse(BaseModel):
+    """Walk Score, Transit Score, and Bike Score for a location."""
+    address: str
+    latitude: float
+    longitude: float
+    walk_score: Optional[int] = None
+    walk_description: Optional[str] = None
+    transit_score: Optional[int] = None
+    transit_description: Optional[str] = None
+    bike_score: Optional[int] = None
+    bike_description: Optional[str] = None
+
+
+class NoiseScoreResponse(BaseModel):
+    """Noise assessment for a location."""
+    noise_score: Optional[int] = None
+    description: Optional[str] = None
+    categories: dict = {}
+    latitude: float
+    longitude: float
+
+
+class SchoolInfo(BaseModel):
+    """School information."""
+    name: str
+    rating: Optional[int] = None
+    distance_miles: Optional[float] = None
+    grades: Optional[str] = None
+    type: Optional[str] = None
+    student_count: Optional[int] = None
+
+
+class LocationInsightsResponse(BaseModel):
+    """Comprehensive location insights including noise and schools."""
+    noise: Optional[NoiseScoreResponse] = None
+    schools: list[SchoolInfo] = []
+
+
+class FloodZoneResponse(BaseModel):
+    """FEMA flood zone data for a location."""
+    latitude: float
+    longitude: float
+    flood_zone: Optional[str] = None
+    zone_subtype: Optional[str] = None
+    risk_level: Optional[str] = None  # high, moderate, low, undetermined
+    description: Optional[str] = None
+    requires_insurance: bool = False
+    annual_chance: Optional[str] = None
+    base_flood_elevation: Optional[float] = None
+    firm_panel: Optional[str] = None
+    effective_date: Optional[str] = None
+
+
+@router.get("/walkscore", response_model=WalkScoreResponse)
+async def get_walk_score(
+    address: str = Query(..., description="Full street address"),
+    latitude: float = Query(..., ge=-90, le=90, description="Latitude"),
+    longitude: float = Query(..., ge=-180, le=180, description="Longitude"),
+):
+    """
+    Get Walk Score, Transit Score, and Bike Score for a location.
+
+    Walk Score measures walkability on a scale of 0-100:
+    - 90-100: Walker's Paradise
+    - 70-89: Very Walkable
+    - 50-69: Somewhat Walkable
+    - 25-49: Car-Dependent
+    - 0-24: Almost All Errands Require a Car
+
+    Transit and Bike scores follow similar scales.
+    Results are cached for 30 days to minimize API calls.
+    """
+    from src.data_sources.walkscore import WalkScoreClient
+    from src.db.models import get_session
+    from src.db.cache import CacheManager
+
+    # Check cache first (round coords to 4 decimal places for cache key)
+    session = get_session()
+    cache = CacheManager(session)
+    cache_params = {
+        "lat": round(latitude, 4),
+        "lon": round(longitude, 4),
+    }
+
+    try:
+        cached = cache.get("walkscore", "walkscore", cache_params)
+        if cached:
+            return WalkScoreResponse(**cached)
+
+        # Cache miss - call API
+        client = WalkScoreClient()
+        try:
+            result = await client.get_scores(
+                address=address,
+                latitude=latitude,
+                longitude=longitude,
+            )
+
+            if not result:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Could not get Walk Score for this location"
+                )
+
+            response_data = {
+                "address": result.address,
+                "latitude": result.latitude,
+                "longitude": result.longitude,
+                "walk_score": result.walk_score,
+                "walk_description": result.walk_description,
+                "transit_score": result.transit_score,
+                "transit_description": result.transit_description,
+                "bike_score": result.bike_score,
+                "bike_description": result.bike_description,
+            }
+
+            # Cache the result (30 days = 720 hours)
+            cache.set("walkscore", "walkscore", cache_params, response_data, ttl_hours=720)
+            cache.log_api_call("walkscore", "walkscore", cache_params, success=True)
+
+            return WalkScoreResponse(**response_data)
+
+        finally:
+            await client.close()
+
+    finally:
+        session.close()
+
+
+@router.get("/location-insights", response_model=LocationInsightsResponse)
+async def get_location_insights(
+    latitude: float = Query(..., ge=-90, le=90, description="Latitude"),
+    longitude: float = Query(..., ge=-180, le=180, description="Longitude"),
+    zip_code: Optional[str] = Query(None, description="ZIP code for fallback school lookup"),
+):
+    """
+    Get comprehensive location insights including noise score and nearby schools.
+
+    Uses US Real Estate API to provide:
+    - Noise score (0-100, higher = quieter)
+    - Nearby schools with ratings
+
+    Results are cached for 1 week to minimize API calls.
+    """
+    from src.data_sources.us_real_estate import USRealEstateClient
+    from src.db.models import get_session
+    from src.db.cache import CacheManager
+
+    # Check cache first
+    session = get_session()
+    cache = CacheManager(session)
+    cache_params = {
+        "lat": round(latitude, 4),
+        "lon": round(longitude, 4),
+        "zip": zip_code,
+    }
+
+    try:
+        cached = cache.get("us_real_estate", "location_insights", cache_params)
+        if cached:
+            return LocationInsightsResponse(**cached)
+
+        # Cache miss - call API
+        client = USRealEstateClient()
+        try:
+            insights = await client.get_location_insights(
+                latitude=latitude,
+                longitude=longitude,
+                zip_code=zip_code,
+            )
+
+            # Build response
+            noise_response = None
+            if insights.get("noise"):
+                noise = insights["noise"]
+                noise_response = {
+                    "noise_score": noise.get("noise_score"),
+                    "description": noise.get("description"),
+                    "categories": noise.get("categories", {}),
+                    "latitude": latitude,
+                    "longitude": longitude,
+                }
+
+            schools_response = []
+            for school in insights.get("schools", []):
+                schools_response.append({
+                    "name": school.get("name", "Unknown"),
+                    "rating": school.get("rating"),
+                    "distance_miles": school.get("distance_miles"),
+                    "grades": school.get("grades"),
+                    "type": school.get("type"),
+                    "student_count": school.get("student_count"),
+                })
+
+            response_data = {
+                "noise": noise_response,
+                "schools": schools_response,
+            }
+
+            # Cache the result (1 week = 168 hours)
+            cache.set("us_real_estate", "location_insights", cache_params, response_data, ttl_hours=168)
+            cache.log_api_call("us_real_estate", "location_insights", cache_params, success=True)
+
+            return LocationInsightsResponse(**response_data)
+
+        finally:
+            await client.close()
+
+    finally:
+        session.close()
+
+
+@router.get("/noise-score", response_model=NoiseScoreResponse)
+async def get_noise_score(
+    latitude: float = Query(..., ge=-90, le=90, description="Latitude"),
+    longitude: float = Query(..., ge=-180, le=180, description="Longitude"),
+):
+    """
+    Get noise assessment for a location.
+
+    Returns a noise score from 0-100 where higher = quieter.
+    Categories include traffic, airport, local noise sources.
+    Results are cached for 30 days.
+    """
+    from src.data_sources.us_real_estate import USRealEstateClient
+    from src.db.models import get_session
+    from src.db.cache import CacheManager
+
+    session = get_session()
+    cache = CacheManager(session)
+    cache_params = {"lat": round(latitude, 4), "lon": round(longitude, 4)}
+
+    try:
+        cached = cache.get("us_real_estate", "noise_score", cache_params)
+        if cached:
+            return NoiseScoreResponse(**cached)
+
+        client = USRealEstateClient()
+        try:
+            result = await client.get_noise_score(latitude, longitude)
+
+            if not result:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Could not get noise score for this location"
+                )
+
+            response_data = {
+                "noise_score": result.get("noise_score"),
+                "description": result.get("description"),
+                "categories": result.get("categories", {}),
+                "latitude": latitude,
+                "longitude": longitude,
+            }
+
+            cache.set("us_real_estate", "noise_score", cache_params, response_data, ttl_hours=720)
+            cache.log_api_call("us_real_estate", "noise_score", cache_params, success=True)
+
+            return NoiseScoreResponse(**response_data)
+
+        finally:
+            await client.close()
+
+    finally:
+        session.close()
+
+
+@router.get("/schools", response_model=list[SchoolInfo])
+async def get_schools(
+    latitude: float = Query(..., ge=-90, le=90, description="Latitude"),
+    longitude: float = Query(..., ge=-180, le=180, description="Longitude"),
+    radius: float = Query(5.0, ge=0.5, le=25, description="Search radius in miles"),
+):
+    """
+    Get schools near a location.
+
+    Returns up to 10 nearby schools with ratings (1-10), grades served, and type.
+    Results are cached for 1 week.
+    """
+    from src.data_sources.us_real_estate import USRealEstateClient
+    from src.db.models import get_session
+    from src.db.cache import CacheManager
+
+    session = get_session()
+    cache = CacheManager(session)
+    cache_params = {"lat": round(latitude, 4), "lon": round(longitude, 4), "radius": radius}
+
+    try:
+        cached = cache.get("us_real_estate", "schools", cache_params)
+        if cached:
+            return [SchoolInfo(**s) for s in cached]
+
+        client = USRealEstateClient()
+        try:
+            schools = await client.get_schools(latitude, longitude, radius)
+
+            response_data = [
+                {
+                    "name": school.get("name", "Unknown"),
+                    "rating": school.get("rating"),
+                    "distance_miles": school.get("distance_miles"),
+                    "grades": school.get("grades"),
+                    "type": school.get("type"),
+                    "student_count": school.get("student_count"),
+                }
+                for school in schools
+            ]
+
+            cache.set("us_real_estate", "schools", cache_params, response_data, ttl_hours=168)
+            cache.log_api_call("us_real_estate", "schools", cache_params, success=True)
+
+            return [SchoolInfo(**s) for s in response_data]
+
+        finally:
+            await client.close()
+
+    finally:
+        session.close()
+
+
+@router.get("/flood-zone", response_model=FloodZoneResponse)
+async def get_flood_zone(
+    latitude: float = Query(..., ge=-90, le=90, description="Latitude"),
+    longitude: float = Query(..., ge=-180, le=180, description="Longitude"),
+):
+    """
+    Get FEMA flood zone data for a location.
+
+    Returns flood zone designation and risk level from the National Flood Hazard Layer.
+
+    Risk levels:
+    - high: 1% annual chance (100-year flood zone) - flood insurance required
+    - moderate: 0.2% annual chance (500-year flood zone)
+    - low: Minimal flood hazard
+    - undetermined: Possible but undetermined flood hazards
+
+    Results are cached for 1 year (flood zones rarely change).
+    """
+    from src.data_sources.fema_flood import FEMAFloodClient
+    from src.db.models import get_session
+    from src.db.cache import CacheManager
+
+    session = get_session()
+    cache = CacheManager(session)
+    cache_params = {"lat": round(latitude, 5), "lon": round(longitude, 5)}
+
+    try:
+        cached = cache.get("fema", "flood", cache_params)
+        if cached:
+            return FloodZoneResponse(**cached)
+
+        client = FEMAFloodClient()
+        try:
+            result = await client.get_flood_zone(latitude, longitude)
+
+            if not result:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Could not get flood zone data for this location"
+                )
+
+            response_data = {
+                "latitude": result.latitude,
+                "longitude": result.longitude,
+                "flood_zone": result.flood_zone,
+                "zone_subtype": result.zone_subtype,
+                "risk_level": result.risk_level,
+                "description": result.description,
+                "requires_insurance": result.requires_insurance,
+                "annual_chance": result.annual_chance,
+                "base_flood_elevation": result.base_flood_elevation,
+                "firm_panel": result.firm_panel,
+                "effective_date": result.effective_date,
+            }
+
+            # Cache for 1 year (8760 hours)
+            cache.set("fema", "flood", cache_params, response_data, ttl_hours=8760)
+            cache.log_api_call("fema", "flood", cache_params, success=True)
+
+            return FloodZoneResponse(**response_data)
+
+        finally:
+            await client.close()
+
+    finally:
+        session.close()

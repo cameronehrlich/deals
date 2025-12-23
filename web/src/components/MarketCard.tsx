@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { TrendingUp, TrendingDown, Minus, Users, Briefcase } from "lucide-react";
-import { Market } from "@/lib/api";
+import { Market, SavedMarket } from "@/lib/api";
 import {
   formatCurrency,
   formatPercent,
@@ -10,7 +10,7 @@ import {
 import { ScoreGauge } from "./ScoreGauge";
 
 interface MarketCardProps {
-  market: Market;
+  market: Market | SavedMarket;
   rank?: number;
 }
 

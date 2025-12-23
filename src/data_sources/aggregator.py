@@ -19,6 +19,7 @@ from src.data_sources.fred import FredClient
 from src.data_sources.hud_fmr import HudFmrLoader
 from src.data_sources.rentcast import RentCastClient
 from src.data_sources.url_parser import PropertyUrlParser, parse_property_url
+from src.data_sources.bls import BLSClient
 
 
 @dataclass
@@ -44,6 +45,10 @@ class EnrichedMarketData:
     mortgage_rate_30yr: Optional[float] = None
     mortgage_rate_15yr: Optional[float] = None
     unemployment_rate: Optional[float] = None
+
+    # From BLS
+    job_growth_yoy: Optional[float] = None
+    metro_unemployment_rate: Optional[float] = None
 
     # From HUD
     fmr_1br: Optional[int] = None
@@ -94,7 +99,13 @@ class EnrichedMarketData:
             avg_rent_to_price=rent_to_price,
             months_of_inventory=self.months_of_supply,
             days_on_market_avg=self.days_on_market,
-            unemployment_rate=self.unemployment_rate / 100 if self.unemployment_rate else None,
+            # Prefer metro-specific unemployment from BLS over national from FRED
+            unemployment_rate=(
+                self.metro_unemployment_rate / 100 if self.metro_unemployment_rate
+                else self.unemployment_rate / 100 if self.unemployment_rate
+                else None
+            ),
+            job_growth_1yr=self.job_growth_yoy,
             price_trend=price_trend,
             landlord_friendly=True,  # Would need additional data source
             data_sources=self.data_sources,
@@ -129,12 +140,14 @@ class DataAggregator:
         self,
         fred_api_key: Optional[str] = None,
         rentcast_api_key: Optional[str] = None,
+        bls_api_key: Optional[str] = None,
     ):
         self.redfin = RedfinDataCenter()
         self.fred = FredClient(api_key=fred_api_key)
         self.hud = HudFmrLoader()
         self.rentcast = RentCastClient(api_key=rentcast_api_key)
         self.url_parser = PropertyUrlParser()
+        self.bls = BLSClient(api_key=bls_api_key)
 
     async def close(self):
         """Close all clients."""
@@ -143,6 +156,7 @@ class DataAggregator:
         await self.hud.close()
         await self.rentcast.close()
         await self.url_parser.close()
+        await self.bls.close()
 
     async def get_market_data(self, city: str, state: str) -> Optional[EnrichedMarketData]:
         """
@@ -207,6 +221,16 @@ class DataAggregator:
                 data_sources.append("hud")
         except Exception as e:
             print(f"HUD FMR fetch failed: {e}")
+
+        # Get BLS employment data
+        try:
+            bls_data = await self.bls.get_metro_employment(market_id)
+            if bls_data:
+                result.job_growth_yoy = bls_data.employment_growth
+                result.metro_unemployment_rate = bls_data.unemployment_rate
+                data_sources.append("bls")
+        except Exception as e:
+            print(f"BLS data fetch failed: {e}")
 
         # Calculate derived metrics
         if result.fmr_2br and result.median_sale_price:

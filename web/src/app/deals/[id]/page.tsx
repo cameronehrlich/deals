@@ -18,8 +18,17 @@ import {
   DollarSign,
   TrendingUp,
   Home,
+  Footprints,
+  Train,
+  Bike,
+  Volume2,
+  GraduationCap,
+  Star,
+  Droplets,
+  ShieldAlert,
+  ShieldCheck,
 } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, WalkScoreResponse, LocationInsightsResponse, FloodZoneResponse } from "@/lib/api";
 import {
   formatCurrency,
   formatPercent,
@@ -39,6 +48,12 @@ export default function DealDetailPage() {
   const [deal, setDeal] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [walkScore, setWalkScore] = useState<WalkScoreResponse | null>(null);
+  const [walkScoreLoading, setWalkScoreLoading] = useState(false);
+  const [locationInsights, setLocationInsights] = useState<LocationInsightsResponse | null>(null);
+  const [locationInsightsLoading, setLocationInsightsLoading] = useState(false);
+  const [floodZone, setFloodZone] = useState<FloodZoneResponse | null>(null);
+  const [floodZoneLoading, setFloodZoneLoading] = useState(false);
 
   useEffect(() => {
     async function fetchDeal() {
@@ -57,6 +72,81 @@ export default function DealDetailPage() {
       fetchDeal();
     }
   }, [dealId]);
+
+  // Fetch Walk Score when we have property coordinates
+  useEffect(() => {
+    async function fetchWalkScore() {
+      if (!deal?.property?.latitude || !deal?.property?.longitude) return;
+
+      try {
+        setWalkScoreLoading(true);
+        const fullAddress = `${deal.property.address}, ${deal.property.city}, ${deal.property.state} ${deal.property.zip_code}`;
+        const scores = await api.getWalkScore({
+          address: fullAddress,
+          latitude: deal.property.latitude,
+          longitude: deal.property.longitude,
+        });
+        setWalkScore(scores);
+      } catch (err) {
+        console.error("Failed to fetch Walk Score:", err);
+      } finally {
+        setWalkScoreLoading(false);
+      }
+    }
+
+    if (deal?.property) {
+      fetchWalkScore();
+    }
+  }, [deal]);
+
+  // Fetch Location Insights (noise score, schools) when we have property coordinates
+  useEffect(() => {
+    async function fetchLocationInsights() {
+      if (!deal?.property?.latitude || !deal?.property?.longitude) return;
+
+      try {
+        setLocationInsightsLoading(true);
+        const insights = await api.getLocationInsights({
+          latitude: deal.property.latitude,
+          longitude: deal.property.longitude,
+          zip_code: deal.property.zip_code,
+        });
+        setLocationInsights(insights);
+      } catch (err) {
+        console.error("Failed to fetch location insights:", err);
+      } finally {
+        setLocationInsightsLoading(false);
+      }
+    }
+
+    if (deal?.property) {
+      fetchLocationInsights();
+    }
+  }, [deal]);
+
+  // Fetch Flood Zone data when we have property coordinates
+  useEffect(() => {
+    async function fetchFloodZone() {
+      if (!deal?.property?.latitude || !deal?.property?.longitude) return;
+
+      try {
+        setFloodZoneLoading(true);
+        const flood = await api.getFloodZone({
+          latitude: deal.property.latitude,
+          longitude: deal.property.longitude,
+        });
+        setFloodZone(flood);
+      } catch (err) {
+        console.error("Failed to fetch flood zone:", err);
+      } finally {
+        setFloodZoneLoading(false);
+      }
+    }
+
+    if (deal?.property) {
+      fetchFloodZone();
+    }
+  }, [deal]);
 
   if (loading) return <LoadingPage />;
   if (error || !deal) {
@@ -439,6 +529,289 @@ export default function DealDetailPage() {
           >
             View full market analysis →
           </Link>
+        </div>
+      )}
+
+      {/* Walk Score */}
+      {(walkScore || walkScoreLoading) && (
+        <div className="card">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            <Footprints className="h-5 w-5" />
+            Location Scores
+          </h3>
+          {walkScoreLoading ? (
+            <div className="flex items-center justify-center py-8 text-gray-500">
+              <div className="animate-spin h-5 w-5 border-2 border-primary-500 border-t-transparent rounded-full mr-2" />
+              Loading Walk Score...
+            </div>
+          ) : walkScore ? (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {/* Walk Score */}
+              <div className="text-center p-4 bg-gray-50 rounded-lg">
+                <div className="flex items-center justify-center gap-2 mb-2">
+                  <Footprints className={cn(
+                    "h-5 w-5",
+                    walkScore.walk_score && walkScore.walk_score >= 70 ? "text-green-600" :
+                    walkScore.walk_score && walkScore.walk_score >= 50 ? "text-yellow-600" : "text-gray-400"
+                  )} />
+                  <span className="text-sm font-medium text-gray-600">Walk Score</span>
+                </div>
+                <p className={cn(
+                  "text-3xl font-bold",
+                  walkScore.walk_score && walkScore.walk_score >= 70 ? "text-green-600" :
+                  walkScore.walk_score && walkScore.walk_score >= 50 ? "text-yellow-600" : "text-gray-900"
+                )}>
+                  {walkScore.walk_score ?? "N/A"}
+                </p>
+                {walkScore.walk_description && (
+                  <p className="text-sm text-gray-500 mt-1">{walkScore.walk_description}</p>
+                )}
+              </div>
+
+              {/* Transit Score */}
+              <div className="text-center p-4 bg-gray-50 rounded-lg">
+                <div className="flex items-center justify-center gap-2 mb-2">
+                  <Train className={cn(
+                    "h-5 w-5",
+                    walkScore.transit_score && walkScore.transit_score >= 70 ? "text-blue-600" :
+                    walkScore.transit_score && walkScore.transit_score >= 50 ? "text-yellow-600" : "text-gray-400"
+                  )} />
+                  <span className="text-sm font-medium text-gray-600">Transit Score</span>
+                </div>
+                <p className={cn(
+                  "text-3xl font-bold",
+                  walkScore.transit_score && walkScore.transit_score >= 70 ? "text-blue-600" :
+                  walkScore.transit_score && walkScore.transit_score >= 50 ? "text-yellow-600" : "text-gray-900"
+                )}>
+                  {walkScore.transit_score ?? "N/A"}
+                </p>
+                {walkScore.transit_description && (
+                  <p className="text-sm text-gray-500 mt-1">{walkScore.transit_description}</p>
+                )}
+              </div>
+
+              {/* Bike Score */}
+              <div className="text-center p-4 bg-gray-50 rounded-lg">
+                <div className="flex items-center justify-center gap-2 mb-2">
+                  <Bike className={cn(
+                    "h-5 w-5",
+                    walkScore.bike_score && walkScore.bike_score >= 70 ? "text-green-600" :
+                    walkScore.bike_score && walkScore.bike_score >= 50 ? "text-yellow-600" : "text-gray-400"
+                  )} />
+                  <span className="text-sm font-medium text-gray-600">Bike Score</span>
+                </div>
+                <p className={cn(
+                  "text-3xl font-bold",
+                  walkScore.bike_score && walkScore.bike_score >= 70 ? "text-green-600" :
+                  walkScore.bike_score && walkScore.bike_score >= 50 ? "text-yellow-600" : "text-gray-900"
+                )}>
+                  {walkScore.bike_score ?? "N/A"}
+                </p>
+                {walkScore.bike_description && (
+                  <p className="text-sm text-gray-500 mt-1">{walkScore.bike_description}</p>
+                )}
+              </div>
+            </div>
+          ) : null}
+          <p className="text-xs text-gray-400 mt-4 text-center">
+            Scores indicate walkability, public transit access, and bikeability (0-100)
+          </p>
+        </div>
+      )}
+
+      {/* Location Insights: Noise Score & Schools */}
+      {(locationInsights || locationInsightsLoading) && (
+        <div className="card">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            <MapPin className="h-5 w-5" />
+            Location Insights
+          </h3>
+          {locationInsightsLoading ? (
+            <div className="flex items-center justify-center py-8 text-gray-500">
+              <div className="animate-spin h-5 w-5 border-2 border-primary-500 border-t-transparent rounded-full mr-2" />
+              Loading location data...
+            </div>
+          ) : locationInsights ? (
+            <div className="space-y-6">
+              {/* Noise Score */}
+              {locationInsights.noise && (
+                <div>
+                  <h4 className="text-md font-medium text-gray-700 mb-3 flex items-center gap-2">
+                    <Volume2 className="h-4 w-4" />
+                    Noise Level
+                  </h4>
+                  <div className="flex items-center gap-4">
+                    <div className="text-center p-4 bg-gray-50 rounded-lg min-w-[100px]">
+                      <p className={cn(
+                        "text-3xl font-bold",
+                        locationInsights.noise.noise_score !== undefined && locationInsights.noise.noise_score <= 30 ? "text-green-600" :
+                        locationInsights.noise.noise_score !== undefined && locationInsights.noise.noise_score <= 60 ? "text-yellow-600" : "text-red-600"
+                      )}>
+                        {locationInsights.noise.noise_score ?? "N/A"}
+                      </p>
+                      <p className="text-sm text-gray-500 mt-1">
+                        {locationInsights.noise.description || "Noise Score"}
+                      </p>
+                    </div>
+                    {locationInsights.noise.categories && Object.keys(locationInsights.noise.categories).length > 0 && (
+                      <div className="flex-1 grid grid-cols-2 md:grid-cols-4 gap-2">
+                        {Object.entries(locationInsights.noise.categories).map(([category, value]) => (
+                          <div key={category} className="text-center p-2 bg-gray-50 rounded">
+                            <p className="text-xs text-gray-500 capitalize">{category.replace(/_/g, ' ')}</p>
+                            <p className="text-sm font-medium">{value as number}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Schools */}
+              {locationInsights.schools && locationInsights.schools.length > 0 && (
+                <div>
+                  <h4 className="text-md font-medium text-gray-700 mb-3 flex items-center gap-2">
+                    <GraduationCap className="h-4 w-4" />
+                    Nearby Schools
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {locationInsights.schools.slice(0, 6).map((school, i) => (
+                      <div key={i} className="p-3 bg-gray-50 rounded-lg">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-gray-900 text-sm truncate">{school.name}</p>
+                            <p className="text-xs text-gray-500">
+                              {school.type && <span className="capitalize">{school.type}</span>}
+                              {school.type && school.grades && " • "}
+                              {school.grades}
+                            </p>
+                            {school.distance_miles !== undefined && (
+                              <p className="text-xs text-gray-400 mt-1">
+                                {school.distance_miles.toFixed(1)} mi away
+                              </p>
+                            )}
+                          </div>
+                          {school.rating !== undefined && school.rating !== null && (
+                            <div className={cn(
+                              "flex items-center gap-1 px-2 py-1 rounded text-xs font-medium",
+                              school.rating >= 8 ? "bg-green-100 text-green-700" :
+                              school.rating >= 6 ? "bg-yellow-100 text-yellow-700" :
+                              school.rating >= 4 ? "bg-orange-100 text-orange-700" : "bg-red-100 text-red-700"
+                            )}>
+                              <Star className="h-3 w-3" />
+                              {school.rating}/10
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {locationInsights.schools.length > 6 && (
+                    <p className="text-xs text-gray-400 mt-2">
+                      + {locationInsights.schools.length - 6} more schools nearby
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {!locationInsights.noise && (!locationInsights.schools || locationInsights.schools.length === 0) && (
+                <p className="text-gray-500 text-center py-4">No location insights available for this property.</p>
+              )}
+            </div>
+          ) : null}
+        </div>
+      )}
+
+      {/* FEMA Flood Zone */}
+      {(floodZone || floodZoneLoading) && (
+        <div className="card">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            <Droplets className="h-5 w-5" />
+            FEMA Flood Zone
+          </h3>
+          {floodZoneLoading ? (
+            <div className="flex items-center justify-center py-8 text-gray-500">
+              <div className="animate-spin h-5 w-5 border-2 border-primary-500 border-t-transparent rounded-full mr-2" />
+              Loading flood zone data...
+            </div>
+          ) : floodZone ? (
+            <div className="flex items-center gap-6">
+              {/* Zone Badge */}
+              <div className={cn(
+                "text-center p-4 rounded-lg min-w-[120px]",
+                floodZone.risk_level === "high" ? "bg-red-50" :
+                floodZone.risk_level === "moderate" ? "bg-yellow-50" :
+                floodZone.risk_level === "low" ? "bg-green-50" : "bg-gray-50"
+              )}>
+                <div className="flex items-center justify-center gap-2 mb-2">
+                  {floodZone.risk_level === "high" ? (
+                    <ShieldAlert className="h-5 w-5 text-red-600" />
+                  ) : floodZone.risk_level === "low" ? (
+                    <ShieldCheck className="h-5 w-5 text-green-600" />
+                  ) : (
+                    <Droplets className={cn(
+                      "h-5 w-5",
+                      floodZone.risk_level === "moderate" ? "text-yellow-600" : "text-gray-400"
+                    )} />
+                  )}
+                  <span className="text-sm font-medium text-gray-600">Zone</span>
+                </div>
+                <p className={cn(
+                  "text-2xl font-bold",
+                  floodZone.risk_level === "high" ? "text-red-600" :
+                  floodZone.risk_level === "moderate" ? "text-yellow-600" :
+                  floodZone.risk_level === "low" ? "text-green-600" : "text-gray-600"
+                )}>
+                  {floodZone.flood_zone || "N/A"}
+                </p>
+                <p className={cn(
+                  "text-xs font-medium capitalize mt-1",
+                  floodZone.risk_level === "high" ? "text-red-600" :
+                  floodZone.risk_level === "moderate" ? "text-yellow-600" :
+                  floodZone.risk_level === "low" ? "text-green-600" : "text-gray-500"
+                )}>
+                  {floodZone.risk_level} Risk
+                </p>
+              </div>
+
+              {/* Details */}
+              <div className="flex-1 space-y-2">
+                <p className="text-gray-700">{floodZone.description}</p>
+                <div className="flex flex-wrap gap-4 text-sm">
+                  {floodZone.annual_chance && (
+                    <div>
+                      <span className="text-gray-500">Annual Flood Chance:</span>{" "}
+                      <span className="font-medium">{floodZone.annual_chance}</span>
+                    </div>
+                  )}
+                  <div>
+                    <span className="text-gray-500">Flood Insurance:</span>{" "}
+                    <span className={cn(
+                      "font-medium",
+                      floodZone.requires_insurance ? "text-red-600" : "text-green-600"
+                    )}>
+                      {floodZone.requires_insurance ? "Required" : "Not Required"}
+                    </span>
+                  </div>
+                  {floodZone.base_flood_elevation && (
+                    <div>
+                      <span className="text-gray-500">Base Flood Elev:</span>{" "}
+                      <span className="font-medium">{floodZone.base_flood_elevation} ft</span>
+                    </div>
+                  )}
+                </div>
+                {floodZone.firm_panel && (
+                  <p className="text-xs text-gray-400 mt-2">
+                    FIRM Panel: {floodZone.firm_panel}
+                    {floodZone.effective_date && ` (Effective: ${floodZone.effective_date})`}
+                  </p>
+                )}
+              </div>
+            </div>
+          ) : null}
+          <p className="text-xs text-gray-400 mt-4 text-center">
+            Data from FEMA National Flood Hazard Layer (NFHL)
+          </p>
         </div>
       )}
 

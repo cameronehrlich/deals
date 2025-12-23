@@ -733,3 +733,234 @@ class USRealEstateClient:
             "comp_count": len(rents),
             "source": "us_real_estate_api",
         }
+
+    # -------------------------------------------------------------------------
+    # Location Data Methods
+    # -------------------------------------------------------------------------
+
+    async def get_noise_score(
+        self,
+        latitude: float,
+        longitude: float,
+    ) -> Optional[dict]:
+        """
+        Get noise assessment for a location.
+
+        Args:
+            latitude: Property latitude
+            longitude: Property longitude
+
+        Returns:
+            Dict with noise_score (0-100), noise_categories, description
+        """
+        params = {
+            "lat": latitude,
+            "lng": longitude,
+        }
+
+        data = await self._request("/location/noise-score", params, "property_detail")
+
+        if not data:
+            return None
+
+        try:
+            noise_data = data.get("data", {})
+
+            # Extract noise scores by category
+            categories = {}
+            overall_score = None
+
+            for category in noise_data.get("noise_categories", []):
+                cat_name = category.get("type", "unknown")
+                cat_score = category.get("score")
+                categories[cat_name] = cat_score
+
+            overall_score = noise_data.get("noise_score")
+
+            # Determine description based on score
+            description = "Unknown"
+            if overall_score is not None:
+                if overall_score >= 80:
+                    description = "Very Quiet"
+                elif overall_score >= 60:
+                    description = "Quiet"
+                elif overall_score >= 40:
+                    description = "Moderate"
+                elif overall_score >= 20:
+                    description = "Noisy"
+                else:
+                    description = "Very Noisy"
+
+            return {
+                "noise_score": overall_score,
+                "description": description,
+                "categories": categories,
+                "latitude": latitude,
+                "longitude": longitude,
+            }
+        except Exception as e:
+            print(f"Error parsing noise score: {e}")
+            return None
+
+    async def get_schools(
+        self,
+        latitude: float,
+        longitude: float,
+        radius_miles: float = 5.0,
+    ) -> list[dict]:
+        """
+        Get schools near a location.
+
+        Args:
+            latitude: Property latitude
+            longitude: Property longitude
+            radius_miles: Search radius in miles
+
+        Returns:
+            List of school dicts with name, rating, distance, grades, type
+        """
+        params = {
+            "lat": latitude,
+            "lng": longitude,
+            "radius": radius_miles,
+        }
+
+        data = await self._request("/location/schools", params, "property_detail")
+
+        if not data:
+            return []
+
+        try:
+            schools_data = data.get("data", {}).get("schools", [])
+            schools = []
+
+            for school in schools_data[:10]:  # Limit to 10 schools
+                schools.append({
+                    "name": school.get("name", "Unknown"),
+                    "rating": school.get("rating"),  # Usually 1-10
+                    "distance_miles": school.get("distance"),
+                    "grades": school.get("grades", {}).get("range", ""),
+                    "type": school.get("funding_type", ""),  # public/private
+                    "student_count": school.get("student_count"),
+                })
+
+            return schools
+        except Exception as e:
+            print(f"Error parsing schools: {e}")
+            return []
+
+    async def get_schools_by_zip(self, zip_code: str) -> list[dict]:
+        """
+        Get schools by postal code.
+
+        Args:
+            zip_code: ZIP code
+
+        Returns:
+            List of school dicts
+        """
+        params = {"postal_code": zip_code}
+        data = await self._request("/location/schools-by-postal-code", params, "property_detail")
+
+        if not data:
+            return []
+
+        try:
+            schools_data = data.get("data", {}).get("schools", [])
+            schools = []
+
+            for school in schools_data[:10]:
+                schools.append({
+                    "name": school.get("name", "Unknown"),
+                    "rating": school.get("rating"),
+                    "grades": school.get("grades", {}).get("range", ""),
+                    "type": school.get("funding_type", ""),
+                    "student_count": school.get("student_count"),
+                })
+
+            return schools
+        except Exception as e:
+            print(f"Error parsing schools by zip: {e}")
+            return []
+
+    async def get_commute_time(
+        self,
+        from_address: str,
+        to_address: str,
+        transportation_type: str = "driving",
+    ) -> Optional[dict]:
+        """
+        Calculate commute time between two addresses.
+
+        Args:
+            from_address: Starting address
+            to_address: Destination address
+            transportation_type: "driving", "transit", "walking", "cycling"
+
+        Returns:
+            Dict with duration_minutes, distance_miles, transportation_type
+        """
+        params = {
+            "from_address": from_address,
+            "to_address": to_address,
+            "transportation_type": transportation_type,
+        }
+
+        data = await self._request("/location/commute-time", params, "property_detail")
+
+        if not data:
+            return None
+
+        try:
+            commute_data = data.get("data", {})
+
+            return {
+                "duration_minutes": commute_data.get("duration_minutes"),
+                "distance_miles": commute_data.get("distance_miles"),
+                "transportation_type": transportation_type,
+                "from_address": from_address,
+                "to_address": to_address,
+            }
+        except Exception as e:
+            print(f"Error parsing commute time: {e}")
+            return None
+
+    async def get_location_insights(
+        self,
+        latitude: float,
+        longitude: float,
+        zip_code: Optional[str] = None,
+    ) -> dict:
+        """
+        Get comprehensive location insights (noise + schools).
+
+        Args:
+            latitude: Property latitude
+            longitude: Property longitude
+            zip_code: Optional ZIP code for school lookup fallback
+
+        Returns:
+            Dict with noise_score, schools
+        """
+        import asyncio
+
+        # Fetch noise and schools in parallel
+        noise_task = self.get_noise_score(latitude, longitude)
+        schools_task = self.get_schools(latitude, longitude)
+
+        noise_result, schools_result = await asyncio.gather(
+            noise_task, schools_task, return_exceptions=True
+        )
+
+        # Handle exceptions
+        noise_data = noise_result if not isinstance(noise_result, Exception) else None
+        schools_data = schools_result if not isinstance(schools_result, Exception) else []
+
+        # Fallback to ZIP code for schools if coordinate lookup failed
+        if not schools_data and zip_code:
+            schools_data = await self.get_schools_by_zip(zip_code)
+
+        return {
+            "noise": noise_data,
+            "schools": schools_data,
+        }

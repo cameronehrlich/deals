@@ -54,7 +54,14 @@ class MarketDB(Base):
 
 
 class SavedPropertyDB(Base):
-    """Saved/analyzed property with full analysis data."""
+    """
+    Saved/analyzed property with full analysis data.
+
+    This is the "Enriched" tier of the property journey:
+    - Tier 1 (Quick Score): Search results with basic metrics
+    - Tier 2 (Full Analysis): Complete analysis on property detail pages
+    - Tier 3 (Enriched): Persisted properties with all data + user customizations
+    """
     __tablename__ = 'saved_properties'
 
     id = Column(String, primary_key=True, default=generate_uuid)
@@ -64,6 +71,8 @@ class SavedPropertyDB(Base):
     city = Column(String, nullable=False)
     state = Column(String(2), nullable=False)
     zip_code = Column(String(10))
+    latitude = Column(Float)  # For location data lookups
+    longitude = Column(Float)
 
     # Property details
     list_price = Column(Float)
@@ -73,24 +82,41 @@ class SavedPropertyDB(Base):
     sqft = Column(Integer)
     property_type = Column(String)
     year_built = Column(Integer)
+    days_on_market = Column(Integer)
 
     # Source
     source = Column(String)  # zillow, redfin, realtor, live_search
     source_url = Column(String)
 
-    # Full analysis (JSON blob of Deal model)
+    # Full analysis (JSON blob of complete Deal model with financials, scores, market)
     analysis_data = Column(JSON)
 
-    # Denormalized scores for quick queries
+    # Denormalized scores for quick queries/sorting
     overall_score = Column(Float)
+    financial_score = Column(Float)
+    market_score = Column(Float)
+    risk_score = Column(Float)
+    liquidity_score = Column(Float)
     cash_flow = Column(Float)
     cash_on_cash = Column(Float)
     cap_rate = Column(Float)
 
-    # Pipeline
+    # Location insights (cached from external APIs)
+    # These are fetched once and persisted to avoid repeated API calls
+    location_data = Column(JSON)  # {walk_score, transit_score, bike_score, noise, schools, flood_zone}
+
+    # User's custom financing scenarios for "What Should I Offer" feature
+    custom_scenarios = Column(JSON)  # [{offer_price, down_payment_pct, interest_rate, ...}, ...]
+
+    # Pipeline and user data
     pipeline_status = Column(String, default='analyzed')  # new, analyzing, analyzed, shortlisted, rejected
     notes = Column(Text)
+    tags = Column(JSON)  # User-defined tags for organization
     is_favorite = Column(Boolean, default=False)
+
+    # Analysis timestamps
+    last_analyzed = Column(DateTime)
+    location_data_fetched = Column(DateTime)  # When location data was last refreshed
 
     # Metadata
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -98,6 +124,13 @@ class SavedPropertyDB(Base):
 
     def __repr__(self):
         return f"<SavedProperty {self.address}, {self.city}>"
+
+    def needs_location_refresh(self, max_age_days: int = 30) -> bool:
+        """Check if location data needs refreshing."""
+        if not self.location_data_fetched:
+            return True
+        age = (datetime.utcnow() - self.location_data_fetched).days
+        return age > max_age_days
 
 
 class SearchCacheDB(Base):

@@ -256,28 +256,94 @@ export interface ImportParsedResponse extends ImportUrlResponse {
   saved_id?: string;
 }
 
-// Saved property from database
+// Saved property from database (Enriched tier)
 export interface SavedProperty {
   id: string;
   address: string;
   city: string;
   state: string;
   zip_code?: string;
+  latitude?: number;
+  longitude?: number;
+
+  // Property details
   list_price?: number;
   estimated_rent?: number;
   bedrooms?: number;
   bathrooms?: number;
   sqft?: number;
   property_type?: string;
+  year_built?: number;
+  days_on_market?: number;
+
+  // Source
   source?: string;
   source_url?: string;
+
+  // All score dimensions
   overall_score?: number;
+  financial_score?: number;
+  market_score?: number;
+  risk_score?: number;
+  liquidity_score?: number;
+
+  // Financial metrics
   cash_flow?: number;
   cash_on_cash?: number;
   cap_rate?: number;
+
+  // Location data (cached from external APIs)
+  location_data?: {
+    walk_score?: number;
+    walk_description?: string;
+    transit_score?: number;
+    transit_description?: string;
+    bike_score?: number;
+    bike_description?: string;
+    noise?: {
+      noise_score?: number;
+      description?: string;
+      categories?: Record<string, number>;
+    };
+    schools?: Array<{
+      name: string;
+      rating?: number;
+      distance_miles?: number;
+      grades?: string;
+      type?: string;
+    }>;
+    flood_zone?: {
+      zone?: string;
+      risk_level?: string;
+      description?: string;
+      requires_insurance?: boolean;
+      annual_chance?: string;
+    };
+  };
+
+  // Custom scenarios (What Should I Offer)
+  custom_scenarios?: Array<{
+    name: string;
+    offer_price: number;
+    down_payment_pct: number;
+    interest_rate: number;
+    loan_term_years: number;
+    monthly_cash_flow: number;
+    cash_on_cash: number;
+    cap_rate: number;
+    total_cash_needed: number;
+    created_at: string;
+  }>;
+
+  // Pipeline
   pipeline_status: string;
   is_favorite: boolean;
   notes?: string;
+  tags?: string[];
+
+  // Timestamps
+  last_analyzed?: string;
+  location_data_fetched?: string;
   created_at: string;
   updated_at: string;
 }
@@ -308,6 +374,24 @@ export interface SavedMarket {
   overall_score: number;
   cash_flow_score: number;
   growth_score: number;
+  // Market data fields
+  median_home_price?: number;
+  median_rent?: number;
+  rent_to_price_ratio?: number;
+  price_change_1yr?: number;
+  job_growth_1yr?: number;
+  unemployment_rate?: number;
+  days_on_market?: number;
+  months_of_inventory?: number;
+}
+
+// Metro suggestion for autocomplete
+export interface MetroSuggestion {
+  name: string;
+  state: string;
+  metro: string;
+  median_price?: number;
+  median_rent?: number;
 }
 
 class ApiClient {
@@ -574,8 +658,62 @@ class ApiClient {
     });
   }
 
+  async saveProperty(params: {
+    address: string;
+    city: string;
+    state: string;
+    zip_code?: string;
+    list_price: number;
+    estimated_rent?: number;
+    bedrooms?: number;
+    bathrooms?: number;
+    sqft?: number;
+    property_type?: string;
+    source?: string;
+    source_url?: string;
+    overall_score?: number;
+    cash_flow?: number;
+    cash_on_cash?: number;
+    cap_rate?: number;
+    analysis_data?: Record<string, unknown>;
+  }): Promise<SavedProperty> {
+    return this.fetch("/api/saved/properties", {
+      method: "POST",
+      body: JSON.stringify(params),
+    });
+  }
+
   async getDatabaseStats(): Promise<DatabaseStats> {
     return this.fetch("/api/saved/stats");
+  }
+
+  // Property enrichment - Re-analyze and refresh location data
+  async refreshPropertyLocationData(propertyId: string): Promise<SavedProperty> {
+    return this.fetch(`/api/saved/properties/${propertyId}/refresh-location`, {
+      method: "POST",
+    });
+  }
+
+  async reanalyzeProperty(propertyId: string): Promise<SavedProperty> {
+    return this.fetch(`/api/saved/properties/${propertyId}/reanalyze`, {
+      method: "POST",
+    });
+  }
+
+  async addPropertyScenario(
+    propertyId: string,
+    scenario: {
+      name?: string;
+      offer_price: number;
+      down_payment_pct?: number;
+      interest_rate?: number;
+      loan_term_years?: number;
+    }
+  ): Promise<SavedProperty> {
+    return this.fetch(`/api/saved/properties/${propertyId}/scenarios`, {
+      method: "POST",
+      body: JSON.stringify(scenario),
+    });
   }
 
   // Saved Markets
@@ -611,6 +749,111 @@ class ApiClient {
       method: "POST",
     });
   }
+
+  async deleteMarket(marketId: string): Promise<{ success: boolean; message: string }> {
+    return this.fetch(`/api/saved/markets/${marketId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async searchMetros(query: string, limit: number = 10): Promise<MetroSuggestion[]> {
+    return this.fetch(`/api/saved/markets/search?q=${encodeURIComponent(query)}&limit=${limit}`);
+  }
+
+  // Walk Score
+  async getWalkScore(params: {
+    address: string;
+    latitude: number;
+    longitude: number;
+  }): Promise<WalkScoreResponse> {
+    const searchParams = new URLSearchParams();
+    searchParams.set("address", params.address);
+    searchParams.set("latitude", params.latitude.toString());
+    searchParams.set("longitude", params.longitude.toString());
+
+    return this.fetch(`/api/import/walkscore?${searchParams}`);
+  }
+
+  // Location Insights (noise score + schools)
+  async getLocationInsights(params: {
+    latitude: number;
+    longitude: number;
+    zip_code?: string;
+  }): Promise<LocationInsightsResponse> {
+    const searchParams = new URLSearchParams();
+    searchParams.set("latitude", params.latitude.toString());
+    searchParams.set("longitude", params.longitude.toString());
+    if (params.zip_code) {
+      searchParams.set("zip_code", params.zip_code);
+    }
+
+    return this.fetch(`/api/import/location-insights?${searchParams}`);
+  }
+
+  // FEMA Flood Zone
+  async getFloodZone(params: {
+    latitude: number;
+    longitude: number;
+  }): Promise<FloodZoneResponse> {
+    const searchParams = new URLSearchParams();
+    searchParams.set("latitude", params.latitude.toString());
+    searchParams.set("longitude", params.longitude.toString());
+
+    return this.fetch(`/api/import/flood-zone?${searchParams}`);
+  }
+}
+
+// Walk Score response
+export interface WalkScoreResponse {
+  address: string;
+  latitude: number;
+  longitude: number;
+  walk_score?: number;
+  walk_description?: string;
+  transit_score?: number;
+  transit_description?: string;
+  bike_score?: number;
+  bike_description?: string;
+}
+
+// Noise Score response
+export interface NoiseScoreResponse {
+  noise_score?: number;
+  description?: string;
+  categories: Record<string, number>;
+  latitude: number;
+  longitude: number;
+}
+
+// School Info
+export interface SchoolInfo {
+  name: string;
+  rating?: number;
+  distance_miles?: number;
+  grades?: string;
+  type?: string;
+  student_count?: number;
+}
+
+// Location Insights response
+export interface LocationInsightsResponse {
+  noise?: NoiseScoreResponse;
+  schools: SchoolInfo[];
+}
+
+// FEMA Flood Zone response
+export interface FloodZoneResponse {
+  latitude: number;
+  longitude: number;
+  flood_zone?: string;
+  zone_subtype?: string;
+  risk_level?: string;  // high, moderate, low, undetermined
+  description?: string;
+  requires_insurance: boolean;
+  annual_chance?: string;
+  base_flood_elevation?: number;
+  firm_panel?: string;
+  effective_date?: string;
 }
 
 export const api = new ApiClient();

@@ -64,6 +64,42 @@ electron/
 └── scraper.js           # Puppeteer scraper for Zillow/Redfin/Realtor
 ```
 
+## Property Journey Architecture
+
+Properties flow through three tiers of increasing data richness:
+
+**Tier 1 - Quick Score (Search Results)**
+- Basic metrics: price, beds/baths, sqft, days on market
+- Quick CoC and cap rate estimates
+- Displayed in search results and deal cards
+- Data from: Live API search
+
+**Tier 2 - Full Analysis (Deal Detail Page)**
+- Complete financial analysis with expense breakdown
+- Location insights: Walk Score, noise, schools, flood zone
+- Market context and comparable properties
+- Pros/cons/red flags evaluation
+- Data fetched on-demand, not persisted
+
+**Tier 3 - Enriched (Saved Properties)**
+- All Tier 2 data, persisted to SQLite
+- Location data cached to avoid repeated API calls
+- Custom "What Should I Offer" scenarios
+- User notes and tags
+- Re-analyze capability with current market data
+
+**Key Files:**
+- `src/db/models.py` - `SavedPropertyDB` with JSON columns for location_data, custom_scenarios
+- `api/routes/saved.py` - Enrichment endpoints: `/refresh-location`, `/reanalyze`, `/scenarios`
+- `web/src/components/PropertyAnalysisView.tsx` - Shared UI component for Tier 2 & 3
+
+**Adding New Location Data:**
+1. Create data source in `src/data_sources/` (e.g., `fema_flood.py`)
+2. Add endpoint in `api/routes/import_property.py` for on-demand fetching
+3. Add to `location_data` JSON in `SavedPropertyDB` for persistence
+4. Add cache TTL in `src/db/cache.py`
+5. Display in `PropertyAnalysisView.tsx`
+
 ## Key Patterns
 
 **Data Flow:** Frontend → api.ts → FastAPI routes → data_sources/db → external APIs
@@ -74,7 +110,12 @@ electron/
 
 **Rent Estimates:** RentCast API → HUD FMR fallback (embedded data for 10 markets)
 
-**Caching:** `CacheManager` with TTL per data type (1hr for listings, 24hr for income)
+**Caching:** `CacheManager` with TTL per data type. Key TTLs:
+- Listings: 1hr
+- Income: 24hr
+- Walk Score: 30 days
+- Noise/Schools: 1 week
+- Flood Zone: 1 year
 
 ## Running Locally
 
@@ -93,6 +134,7 @@ cd electron && npm run dev
 
 ```bash
 RAPIDAPI_KEY=xxx          # Required for live property search
+WALKSCORE_API_KEY=xxx     # Required for Walk Score (official API)
 FRED_API_KEY=xxx          # Optional, macro data
 RENTCAST_API_KEY=xxx      # Optional, rent estimates
 ```
@@ -109,6 +151,10 @@ RENTCAST_API_KEY=xxx      # Optional, rent estimates
 | URL scraping | `electron/scraper.js`, `src/data_sources/url_parser.py` |
 | Image carousel | `web/src/components/ImageCarousel.tsx` |
 | Sorting/filtering | `web/src/app/deals/page.tsx` (SORT_OPTIONS, client-side) |
+| Property analysis UI | `web/src/components/PropertyAnalysisView.tsx` (shared for deals/saved) |
+| Walk Score | `src/data_sources/walkscore.py`, `api/routes/import_property.py` |
+| Flood zone | `src/data_sources/fema_flood.py`, `api/routes/import_property.py` |
+| Location enrichment | `api/routes/saved.py` (`/refresh-location`, `/reanalyze`) |
 
 ## Common Tasks
 

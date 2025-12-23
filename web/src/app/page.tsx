@@ -12,7 +12,7 @@ import {
   Percent,
   Activity,
 } from "lucide-react";
-import { api, Market, Deal, MacroDataResponse } from "@/lib/api";
+import { api, SavedMarket, Deal, MacroDataResponse } from "@/lib/api";
 import { formatCurrency, formatPercent } from "@/lib/utils";
 import { StatCard } from "@/components/StatCard";
 import { MarketCard } from "@/components/MarketCard";
@@ -20,7 +20,7 @@ import { DealCard } from "@/components/DealCard";
 import { LoadingPage, LoadingSpinner } from "@/components/LoadingSpinner";
 
 export default function DashboardPage() {
-  const [markets, setMarkets] = useState<Market[]>([]);
+  const [markets, setMarkets] = useState<SavedMarket[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [macroData, setMacroData] = useState<MacroDataResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -30,12 +30,15 @@ export default function DashboardPage() {
     async function fetchData() {
       try {
         setLoading(true);
+        // Use saved/favorite markets from database (unified with Markets tab)
         const [marketsRes, dealsRes, macroRes] = await Promise.all([
-          api.getMarkets({ sort_by: "overall", limit: 5 }),
+          api.getFavoriteMarkets(),
           api.searchDeals({ limit: 5 }),
           api.getMacroData().catch(() => null),
         ]);
-        setMarkets(marketsRes.markets);
+        // Sort by overall score descending
+        const sortedMarkets = marketsRes.sort((a, b) => b.overall_score - a.overall_score);
+        setMarkets(sortedMarkets);
         setDeals(dealsRes.deals);
         setMacroData(macroRes);
       } catch (err) {
