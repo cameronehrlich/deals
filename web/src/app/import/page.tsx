@@ -254,25 +254,43 @@ function AnalyzePageContent() {
     try {
       setSaving(true);
 
-      // Use the new direct save endpoint - no re-analysis needed!
+      // Save property with full analysis data including pros/cons
       const savedProperty = await api.saveProperty({
+        // Property location
         address: result.deal.property.address,
         city: result.deal.property.city,
         state: result.deal.property.state,
         zip_code: result.deal.property.zip_code,
+        // Property details
         list_price: result.deal.property.list_price,
         estimated_rent: result.deal.property.estimated_rent,
         bedrooms: result.deal.property.bedrooms,
         bathrooms: result.deal.property.bathrooms,
         sqft: result.deal.property.sqft,
         property_type: result.deal.property.property_type,
+        days_on_market: result.deal.property.days_on_market,
+        // Source
         source: result.source || "manual",
         source_url: passedProperty?.source_url || url || undefined,
-        // Include pre-calculated financial metrics
+        // All score dimensions
         overall_score: result.deal.score?.overall_score,
+        financial_score: result.deal.score?.financial_score,
+        market_score: result.deal.score?.market_score,
+        risk_score: result.deal.score?.risk_score,
+        liquidity_score: result.deal.score?.liquidity_score,
+        // Financial metrics
         cash_flow: result.deal.financials?.monthly_cash_flow,
         cash_on_cash: result.deal.financials?.cash_on_cash_return,
         cap_rate: result.deal.financials?.cap_rate,
+        // Full analysis data - this includes pros, cons, financials details, etc.
+        analysis_data: {
+          property: result.deal.property,
+          financials: result.deal.financials,
+          score: result.deal.score,
+          pros: result.deal.pros,
+          cons: result.deal.cons,
+          market_name: result.deal.market_name,
+        },
       });
 
       if (savedProperty?.id) {

@@ -714,7 +714,9 @@ export default function SavedPropertyDetailPage({
                   ))}
                 </ul>
               ) : (
-                <p className="text-sm text-gray-400 italic">No standout pros identified</p>
+                <p className="text-sm text-gray-400 italic">
+                  {!analysis ? "Click 'Re-analyze' to generate pros/cons" : "No standout pros identified"}
+                </p>
               )}
             </div>
 
@@ -739,10 +741,30 @@ export default function SavedPropertyDetailPage({
                   ))}
                 </ul>
               ) : (
-                <p className="text-sm text-gray-400 italic">No significant cons identified</p>
+                <p className="text-sm text-gray-400 italic">
+                  {!analysis ? "Click 'Re-analyze' to generate pros/cons" : "No significant cons identified"}
+                </p>
               )}
             </div>
           </div>
+
+          {/* Red Flags */}
+          {redFlags.length > 0 && (
+            <div className="card border-red-300 bg-red-50">
+              <h3 className="font-semibold mb-3 flex items-center gap-2 text-red-800">
+                <XCircle className="h-5 w-5" />
+                Red Flags
+              </h3>
+              <ul className="space-y-2">
+                {redFlags.map((flag: string, i: number) => (
+                  <li key={i} className="text-sm text-red-700 flex items-start gap-2">
+                    <XCircle className="h-4 w-4 text-red-600 mt-0.5 flex-shrink-0" />
+                    {flag}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {/* Saved Scenarios */}
           {savedProperty.custom_scenarios && savedProperty.custom_scenarios.length > 0 && (
@@ -1065,20 +1087,35 @@ export default function SavedPropertyDetailPage({
             )}
           </div>
 
-          {/* Source Link */}
-          {savedProperty.source_url && (
-            <div className="text-center">
+          {/* Actions */}
+          <div className="flex flex-wrap gap-3 justify-center">
+            <button
+              onClick={() => {
+                const params = new URLSearchParams();
+                if (offerPrice) params.set('price', offerPrice.toString());
+                if (savedProperty.estimated_rent) params.set('rent', savedProperty.estimated_rent.toString());
+                if (savedProperty.zip_code) params.set('zip', savedProperty.zip_code);
+                params.set('down', downPaymentPct);
+                params.set('rate', interestRate);
+                router.push(`/calculator?${params.toString()}`);
+              }}
+              className="btn-outline flex items-center gap-2"
+            >
+              <Calculator className="h-4 w-4" />
+              Open in Calculator
+            </button>
+            {savedProperty.source_url && (
               <a
                 href={savedProperty.source_url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 text-primary-600 hover:text-primary-700"
+                className="btn-outline flex items-center gap-2"
               >
                 <ExternalLink className="h-4 w-4" />
-                View Original Listing on {savedProperty.source || "source"}
+                View Original Listing
               </a>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* Property Metadata */}
           <div className="card bg-gray-50">

@@ -663,18 +663,29 @@ class ApiClient {
     city: string;
     state: string;
     zip_code?: string;
+    latitude?: number;
+    longitude?: number;
     list_price: number;
     estimated_rent?: number;
     bedrooms?: number;
     bathrooms?: number;
     sqft?: number;
     property_type?: string;
+    year_built?: number;
+    days_on_market?: number;
     source?: string;
     source_url?: string;
+    // All score dimensions
     overall_score?: number;
+    financial_score?: number;
+    market_score?: number;
+    risk_score?: number;
+    liquidity_score?: number;
+    // Financial metrics
     cash_flow?: number;
     cash_on_cash?: number;
     cap_rate?: number;
+    // Full analysis data (includes pros/cons)
     analysis_data?: Record<string, unknown>;
   }): Promise<SavedProperty> {
     return this.fetch("/api/saved/properties", {
