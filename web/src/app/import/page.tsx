@@ -800,12 +800,6 @@ function AnalyzePageContent() {
               {/* Actions */}
               <div className="flex flex-wrap gap-3">
                 <button
-                  onClick={reset}
-                  className="btn-outline"
-                >
-                  Analyze Another
-                </button>
-                <button
                   onClick={() => {
                     const params = new URLSearchParams();
                     if (offerPrice) params.set('price', offerPrice.toString());
