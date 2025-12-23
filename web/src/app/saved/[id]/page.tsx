@@ -54,6 +54,7 @@ import {
 } from "@/lib/utils";
 import { LoadingPage, LoadingSpinner } from "@/components/LoadingSpinner";
 import { ScoreGauge } from "@/components/ScoreGauge";
+import { ImageCarousel } from "@/components/ImageCarousel";
 
 export default function SavedPropertyDetailPage({
   params,
@@ -296,15 +297,12 @@ export default function SavedPropertyDetailPage({
 
     try {
       setSavingScenario(true);
+      // Backend calculates the financials from offer_price and loan terms
       const updated = await api.addPropertyScenario(savedProperty.id, {
         name: scenarioName,
         offer_price: offerPrice,
         down_payment_pct: parseFloat(downPaymentPct) / 100,
         interest_rate: parseFloat(interestRate) / 100,
-        monthly_cash_flow: adjustedFinancials.monthlyCashFlow,
-        cash_on_cash: adjustedFinancials.cashOnCash,
-        cap_rate: adjustedFinancials.capRate,
-        total_cash_needed: adjustedFinancials.totalCashInvested,
       });
       setSavedProperty(updated);
     } catch (err) {
@@ -564,6 +562,18 @@ export default function SavedPropertyDetailPage({
 
         {/* Main Content */}
         <div className="lg:col-span-2 space-y-6">
+          {/* Photo Carousel */}
+          {savedProperty.photos && savedProperty.photos.length > 0 && (
+            <div className="card p-0 overflow-hidden">
+              <div className="h-64 sm:h-80">
+                <ImageCarousel
+                  images={savedProperty.photos}
+                  alt={savedProperty.address}
+                />
+              </div>
+            </div>
+          )}
+
           {/* Property Header */}
           <div className="card">
             <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">

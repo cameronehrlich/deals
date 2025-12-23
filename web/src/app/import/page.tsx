@@ -20,8 +20,17 @@ import {
   BarChart3,
   Bookmark,
   BookmarkCheck,
+  Footprints,
+  Train,
+  Bike,
+  Volume2,
+  GraduationCap,
+  Star,
+  Droplets,
+  ShieldAlert,
+  ShieldCheck,
 } from "lucide-react";
-import { api, ImportUrlResponse, Deal, MacroDataResponse, PropertyListing } from "@/lib/api";
+import { api, ImportUrlResponse, Deal, MacroDataResponse, PropertyListing, AllLocationDataResponse } from "@/lib/api";
 import {
   formatCurrency,
   formatPercent,
@@ -30,6 +39,7 @@ import {
 } from "@/lib/utils";
 import { ScoreGauge } from "@/components/ScoreGauge";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
+import { ImageCarousel } from "@/components/ImageCarousel";
 import { isElectron, scrapePropertyLocally } from "@/lib/electron";
 
 // Inner component that uses searchParams
@@ -65,6 +75,11 @@ function AnalyzePageContent() {
   // Save state
   const [savedId, setSavedId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // Location data state
+  const [locationData, setLocationData] = useState<AllLocationDataResponse | null>(null);
+  const [loadingLocation, setLoadingLocation] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
 
   // Check if running in Electron on mount
   useEffect(() => {
@@ -243,8 +258,51 @@ function AnalyzePageContent() {
     setOfferPrice(null);
     setPassedProperty(null);
     setSavedId(null);
+    setLocationData(null);
+    setLocationError(null);
     // Clear URL params
     router.replace("/import");
+  };
+
+  // Fetch location data (Walk Score, Flood Zone, Noise, Schools)
+  const handleFetchLocationData = async () => {
+    if (!result?.deal?.property || loadingLocation) return;
+
+    const property = result.deal.property;
+
+    // Need coordinates - try to use passedProperty lat/lon or fall back
+    const latitude = passedProperty?.latitude;
+    const longitude = passedProperty?.longitude;
+
+    if (!latitude || !longitude) {
+      setLocationError("Location coordinates not available for this property.");
+      return;
+    }
+
+    try {
+      setLoadingLocation(true);
+      setLocationError(null);
+
+      const fullAddress = `${property.address}, ${property.city}, ${property.state} ${property.zip_code || ''}`;
+
+      const data = await api.getAllLocationData({
+        address: fullAddress,
+        latitude,
+        longitude,
+        zip_code: property.zip_code,
+      });
+
+      setLocationData(data);
+
+      if (data.errors?.length > 0) {
+        console.warn("Some location data failed to fetch:", data.errors);
+      }
+    } catch (err) {
+      console.error("Failed to fetch location data:", err);
+      setLocationError(err instanceof Error ? err.message : "Failed to fetch location data");
+    } finally {
+      setLoadingLocation(false);
+    }
   };
 
   // Save property to database
@@ -269,6 +327,7 @@ function AnalyzePageContent() {
         sqft: result.deal.property.sqft,
         property_type: result.deal.property.property_type,
         days_on_market: result.deal.property.days_on_market,
+        photos: passedProperty?.photos,
         // Source
         source: result.source || "manual",
         source_url: passedProperty?.source_url || url || undefined,
@@ -574,6 +633,18 @@ function AnalyzePageContent() {
                 </div>
               )}
 
+              {/* Photo Carousel */}
+              {passedProperty?.photos && passedProperty.photos.length > 0 && (
+                <div className="card p-0 overflow-hidden">
+                  <div className="h-64 sm:h-80">
+                    <ImageCarousel
+                      images={passedProperty.photos}
+                      alt={result.deal.property.address}
+                    />
+                  </div>
+                </div>
+              )}
+
               {/* Property Overview */}
               <div className="card">
                 <div className="flex items-start justify-between">
@@ -795,6 +866,254 @@ function AnalyzePageContent() {
                     <p className="text-sm text-gray-400 italic">No significant cons identified</p>
                   )}
                 </div>
+              </div>
+
+              {/* Location Insights Section */}
+              <div className="card">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                    <MapPin className="h-5 w-5 text-primary-600" />
+                    Location Insights
+                  </h3>
+                  {!locationData && (
+                    <button
+                      onClick={handleFetchLocationData}
+                      disabled={loadingLocation || !passedProperty?.latitude}
+                      className="btn-outline text-sm flex items-center gap-2"
+                      title={!passedProperty?.latitude ? "Coordinates not available for this property" : undefined}
+                    >
+                      {loadingLocation ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Fetching...
+                        </>
+                      ) : (
+                        <>
+                          <MapPin className="h-4 w-4" />
+                          Fetch Location Data
+                        </>
+                      )}
+                    </button>
+                  )}
+                </div>
+
+                {locationError && (
+                  <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-700 mb-4">
+                    <AlertTriangle className="h-4 w-4 inline mr-2" />
+                    {locationError}
+                  </div>
+                )}
+
+                {!locationData && !loadingLocation && !locationError && (
+                  <p className="text-sm text-gray-500 italic">
+                    Click "Fetch Location Data" to get Walk Score, flood zone, noise levels, and nearby schools.
+                  </p>
+                )}
+
+                {loadingLocation && (
+                  <div className="flex items-center justify-center py-8 text-gray-500">
+                    <div className="animate-spin h-5 w-5 border-2 border-primary-500 border-t-transparent rounded-full mr-2" />
+                    Fetching Walk Score, flood zone, noise, and schools...
+                  </div>
+                )}
+
+                {locationData && (
+                  <div className="space-y-6">
+                    {/* Walk Score */}
+                    {(locationData.walk_score || locationData.transit_score || locationData.bike_score) && (
+                      <div>
+                        <h4 className="text-md font-medium text-gray-700 mb-3 flex items-center gap-2">
+                          <Footprints className="h-4 w-4" />
+                          Walk Score
+                        </h4>
+                        <div className="grid grid-cols-3 gap-4">
+                          <div className="text-center p-4 bg-gray-50 rounded-lg">
+                            <Footprints className="h-6 w-6 mx-auto mb-2 text-gray-600" />
+                            <p className="text-3xl font-bold text-primary-600">
+                              {locationData.walk_score ?? "N/A"}
+                            </p>
+                            <p className="text-sm text-gray-500">{locationData.walk_description || "Walk Score"}</p>
+                          </div>
+                          <div className="text-center p-4 bg-gray-50 rounded-lg">
+                            <Train className="h-6 w-6 mx-auto mb-2 text-gray-600" />
+                            <p className="text-3xl font-bold text-blue-600">
+                              {locationData.transit_score ?? "N/A"}
+                            </p>
+                            <p className="text-sm text-gray-500">{locationData.transit_description || "Transit Score"}</p>
+                          </div>
+                          <div className="text-center p-4 bg-gray-50 rounded-lg">
+                            <Bike className="h-6 w-6 mx-auto mb-2 text-gray-600" />
+                            <p className="text-3xl font-bold text-green-600">
+                              {locationData.bike_score ?? "N/A"}
+                            </p>
+                            <p className="text-sm text-gray-500">{locationData.bike_description || "Bike Score"}</p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Noise Level */}
+                    {locationData.noise && (
+                      <div>
+                        <h4 className="text-md font-medium text-gray-700 mb-3 flex items-center gap-2">
+                          <Volume2 className="h-4 w-4" />
+                          Noise Level
+                        </h4>
+                        <div className="flex items-center gap-4">
+                          <div className="text-center p-4 bg-gray-50 rounded-lg min-w-[100px]">
+                            <p className={cn(
+                              "text-3xl font-bold",
+                              locationData.noise.noise_score !== undefined && locationData.noise.noise_score >= 70
+                                ? "text-green-600"
+                                : locationData.noise.noise_score !== undefined && locationData.noise.noise_score >= 40
+                                ? "text-yellow-600"
+                                : "text-red-600"
+                            )}>
+                              {locationData.noise.noise_score ?? "N/A"}
+                            </p>
+                            <p className="text-sm text-gray-500 mt-1">
+                              {locationData.noise.description || "Noise Score"}
+                            </p>
+                          </div>
+                          <p className="text-sm text-gray-500">
+                            Higher score = quieter area. 80+ is very quiet, below 50 is noisy.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Schools */}
+                    {locationData.schools && locationData.schools.length > 0 && (
+                      <div>
+                        <h4 className="text-md font-medium text-gray-700 mb-3 flex items-center gap-2">
+                          <GraduationCap className="h-4 w-4" />
+                          Nearby Schools
+                        </h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                          {locationData.schools.slice(0, 6).map((school, i) => (
+                            <div key={i} className="p-3 bg-gray-50 rounded-lg">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex-1 min-w-0">
+                                  <p className="font-medium text-gray-900 text-sm truncate">{school.name}</p>
+                                  <p className="text-xs text-gray-500">
+                                    {school.type && <span className="capitalize">{school.type}</span>}
+                                    {school.type && school.grades && " - "}
+                                    {school.grades}
+                                  </p>
+                                  {school.distance_miles !== undefined && (
+                                    <p className="text-xs text-gray-400 mt-1">
+                                      {school.distance_miles.toFixed(1)} mi away
+                                    </p>
+                                  )}
+                                </div>
+                                {school.rating !== undefined && school.rating !== null && (
+                                  <div className={cn(
+                                    "flex items-center gap-1 px-2 py-1 rounded text-xs font-medium",
+                                    school.rating >= 8
+                                      ? "bg-green-100 text-green-700"
+                                      : school.rating >= 6
+                                      ? "bg-yellow-100 text-yellow-700"
+                                      : school.rating >= 4
+                                      ? "bg-orange-100 text-orange-700"
+                                      : "bg-red-100 text-red-700"
+                                  )}>
+                                    <Star className="h-3 w-3" />
+                                    {school.rating}/10
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Flood Zone */}
+                    {locationData.flood_zone && (
+                      <div>
+                        <h4 className="text-md font-medium text-gray-700 mb-3 flex items-center gap-2">
+                          <Droplets className="h-4 w-4" />
+                          FEMA Flood Zone
+                        </h4>
+                        <div className="flex items-center gap-6">
+                          <div className={cn(
+                            "text-center p-4 rounded-lg min-w-[120px]",
+                            locationData.flood_zone.risk_level === "high"
+                              ? "bg-red-50"
+                              : locationData.flood_zone.risk_level === "moderate"
+                              ? "bg-yellow-50"
+                              : locationData.flood_zone.risk_level === "low"
+                              ? "bg-green-50"
+                              : "bg-gray-50"
+                          )}>
+                            <div className="flex items-center justify-center gap-2 mb-2">
+                              {locationData.flood_zone.risk_level === "high" ? (
+                                <ShieldAlert className="h-5 w-5 text-red-600" />
+                              ) : locationData.flood_zone.risk_level === "low" ? (
+                                <ShieldCheck className="h-5 w-5 text-green-600" />
+                              ) : (
+                                <Droplets className="h-5 w-5 text-gray-400" />
+                              )}
+                              <span className="text-sm font-medium text-gray-600">Zone</span>
+                            </div>
+                            <p className={cn(
+                              "text-2xl font-bold",
+                              locationData.flood_zone.risk_level === "high"
+                                ? "text-red-600"
+                                : locationData.flood_zone.risk_level === "moderate"
+                                ? "text-yellow-600"
+                                : locationData.flood_zone.risk_level === "low"
+                                ? "text-green-600"
+                                : "text-gray-600"
+                            )}>
+                              {locationData.flood_zone.zone || "N/A"}
+                            </p>
+                            <p className={cn(
+                              "text-xs font-medium capitalize mt-1",
+                              locationData.flood_zone.risk_level === "high"
+                                ? "text-red-600"
+                                : locationData.flood_zone.risk_level === "moderate"
+                                ? "text-yellow-600"
+                                : locationData.flood_zone.risk_level === "low"
+                                ? "text-green-600"
+                                : "text-gray-500"
+                            )}>
+                              {locationData.flood_zone.risk_level} Risk
+                            </p>
+                          </div>
+                          <div className="flex-1 space-y-2">
+                            <p className="text-gray-700">{locationData.flood_zone.description}</p>
+                            <div className="flex flex-wrap gap-4 text-sm">
+                              {locationData.flood_zone.annual_chance && (
+                                <div>
+                                  <span className="text-gray-500">Annual Flood Chance:</span>{" "}
+                                  <span className="font-medium">{locationData.flood_zone.annual_chance}</span>
+                                </div>
+                              )}
+                              <div>
+                                <span className="text-gray-500">Flood Insurance:</span>{" "}
+                                <span className={cn(
+                                  "font-medium",
+                                  locationData.flood_zone.requires_insurance ? "text-red-600" : "text-green-600"
+                                )}>
+                                  {locationData.flood_zone.requires_insurance ? "Required" : "Not Required"}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Errors from individual API calls */}
+                    {locationData.errors && locationData.errors.length > 0 && (
+                      <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-700">
+                        <AlertTriangle className="h-4 w-4 inline mr-2" />
+                        Some location data could not be fetched: {locationData.errors.join("; ")}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Actions */}

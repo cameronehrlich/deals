@@ -87,6 +87,7 @@ class SavedPropertyDB(Base):
     # Source
     source = Column(String)  # zillow, redfin, realtor, live_search
     source_url = Column(String)
+    photos = Column(JSON)  # List of photo URLs
 
     # Full analysis (JSON blob of complete Deal model with financials, scores, market)
     analysis_data = Column(JSON)

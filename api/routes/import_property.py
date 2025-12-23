@@ -969,3 +969,113 @@ async def get_flood_zone(
 
     finally:
         session.close()
+
+
+class AllLocationDataResponse(BaseModel):
+    """Combined location data from all sources."""
+    # Walk Score
+    walk_score: Optional[int] = None
+    walk_description: Optional[str] = None
+    transit_score: Optional[int] = None
+    transit_description: Optional[str] = None
+    bike_score: Optional[int] = None
+    bike_description: Optional[str] = None
+    # Noise
+    noise: Optional[dict] = None
+    # Schools
+    schools: list[SchoolInfo] = []
+    # Flood Zone
+    flood_zone: Optional[dict] = None
+    # Metadata
+    errors: list[str] = []
+
+
+@router.get("/all-location-data", response_model=AllLocationDataResponse)
+async def get_all_location_data(
+    address: str = Query(..., description="Full street address"),
+    latitude: float = Query(..., ge=-90, le=90, description="Latitude"),
+    longitude: float = Query(..., ge=-180, le=180, description="Longitude"),
+    zip_code: Optional[str] = Query(None, description="ZIP code"),
+):
+    """
+    Fetch all location data (Walk Score, Noise, Schools, Flood Zone) in parallel.
+
+    This is more efficient than calling each endpoint separately.
+    Use this for the property analysis page to get comprehensive location insights.
+    """
+    import asyncio
+    from src.data_sources.walkscore import WalkScoreClient
+    from src.data_sources.us_real_estate import USRealEstateClient
+    from src.data_sources.fema_flood import FEMAFloodClient
+
+    walkscore_client = WalkScoreClient()
+    us_real_estate_client = USRealEstateClient()
+    fema_client = FEMAFloodClient()
+
+    errors = []
+    result = AllLocationDataResponse()
+
+    try:
+        # Fetch all data in parallel
+        walkscore_task = walkscore_client.get_scores(address, latitude, longitude)
+        location_insights_task = us_real_estate_client.get_location_insights(
+            latitude, longitude, zip_code
+        )
+        flood_task = fema_client.get_flood_zone(latitude, longitude)
+
+        walkscore, location_insights, flood = await asyncio.gather(
+            walkscore_task, location_insights_task, flood_task,
+            return_exceptions=True
+        )
+
+        # Process Walk Score
+        if walkscore and not isinstance(walkscore, Exception):
+            result.walk_score = walkscore.walk_score
+            result.walk_description = walkscore.walk_description
+            result.transit_score = walkscore.transit_score
+            result.transit_description = walkscore.transit_description
+            result.bike_score = walkscore.bike_score
+            result.bike_description = walkscore.bike_description
+        elif isinstance(walkscore, Exception):
+            errors.append(f"Walk Score: {str(walkscore)}")
+
+        # Process Location Insights (Noise + Schools)
+        if location_insights and not isinstance(location_insights, Exception):
+            if location_insights.get("noise"):
+                result.noise = location_insights["noise"]
+            if location_insights.get("schools"):
+                result.schools = [
+                    SchoolInfo(
+                        name=s.get("name", "Unknown"),
+                        rating=s.get("rating"),
+                        distance_miles=s.get("distance_miles"),
+                        grades=s.get("grades"),
+                        type=s.get("type"),
+                        student_count=s.get("student_count"),
+                    )
+                    for s in location_insights["schools"]
+                ]
+        elif isinstance(location_insights, Exception):
+            errors.append(f"Location Insights: {str(location_insights)}")
+
+        # Process Flood Zone
+        if flood and not isinstance(flood, Exception):
+            result.flood_zone = {
+                "zone": flood.flood_zone,
+                "zone_subtype": flood.zone_subtype,
+                "risk_level": flood.risk_level,
+                "description": flood.description,
+                "requires_insurance": flood.requires_insurance,
+                "annual_chance": flood.annual_chance,
+            }
+        elif isinstance(flood, Exception):
+            errors.append(f"Flood Zone: {str(flood)}")
+
+        result.errors = errors
+
+    finally:
+        await walkscore_client.close()
+        await us_real_estate_client.close()
+        await fema_client.close()
+
+    return result

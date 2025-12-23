@@ -205,6 +205,8 @@ export interface PropertyListing {
   source_url?: string;
   year_built?: number;
   price_per_sqft?: number;
+  latitude?: number;
+  longitude?: number;
 }
 
 export interface PropertySearchResponse {
@@ -275,6 +277,7 @@ export interface SavedProperty {
   property_type?: string;
   year_built?: number;
   days_on_market?: number;
+  photos?: string[];
 
   // Source
   source?: string;
@@ -673,6 +676,7 @@ class ApiClient {
     property_type?: string;
     year_built?: number;
     days_on_market?: number;
+    photos?: string[];
     source?: string;
     source_url?: string;
     // All score dimensions
@@ -812,6 +816,23 @@ class ApiClient {
 
     return this.fetch(`/api/import/flood-zone?${searchParams}`);
   }
+
+  async getAllLocationData(params: {
+    address: string;
+    latitude: number;
+    longitude: number;
+    zip_code?: string;
+  }): Promise<AllLocationDataResponse> {
+    const searchParams = new URLSearchParams();
+    searchParams.set("address", params.address);
+    searchParams.set("latitude", params.latitude.toString());
+    searchParams.set("longitude", params.longitude.toString());
+    if (params.zip_code) {
+      searchParams.set("zip_code", params.zip_code);
+    }
+
+    return this.fetch(`/api/import/all-location-data?${searchParams}`);
+  }
 }
 
 // Walk Score response
@@ -865,6 +886,43 @@ export interface FloodZoneResponse {
   base_flood_elevation?: number;
   firm_panel?: string;
   effective_date?: string;
+}
+
+// Combined location data from all sources
+export interface AllLocationDataResponse {
+  // Walk Score
+  walk_score?: number;
+  walk_description?: string;
+  transit_score?: number;
+  transit_description?: string;
+  bike_score?: number;
+  bike_description?: string;
+  // Noise
+  noise?: {
+    noise_score?: number;
+    description?: string;
+    categories?: Record<string, number>;
+  };
+  // Schools
+  schools: Array<{
+    name: string;
+    rating?: number;
+    distance_miles?: number;
+    grades?: string;
+    type?: string;
+    student_count?: number;
+  }>;
+  // Flood Zone
+  flood_zone?: {
+    zone?: string;
+    zone_subtype?: string;
+    risk_level?: string;
+    description?: string;
+    requires_insurance?: boolean;
+    annual_chance?: string;
+  };
+  // Errors from individual API calls
+  errors: string[];
 }
 
 export const api = new ApiClient();

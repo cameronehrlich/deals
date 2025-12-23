@@ -62,6 +62,7 @@ class SavedPropertyResponse(BaseModel):
     # Source
     source: Optional[str] = None
     source_url: Optional[str] = None
+    photos: Optional[List[str]] = None
 
     # All score dimensions (not just overall)
     overall_score: Optional[float] = None
@@ -137,6 +138,7 @@ class SavePropertyRequest(BaseModel):
     # Source
     source: Optional[str] = None
     source_url: Optional[str] = None
+    photos: Optional[List[str]] = None
 
     # All score dimensions
     overall_score: Optional[float] = None
@@ -196,6 +198,7 @@ def build_property_response(p) -> SavedPropertyResponse:
         days_on_market=getattr(p, 'days_on_market', None),
         source=p.source,
         source_url=p.source_url,
+        photos=getattr(p, 'photos', None),
         overall_score=p.overall_score,
         financial_score=getattr(p, 'financial_score', None),
         market_score=getattr(p, 'market_score', None),
@@ -568,6 +571,8 @@ async def save_property(request: SavePropertyRequest):
         existing.longitude = request.longitude
         existing.year_built = request.year_built
         existing.days_on_market = request.days_on_market
+        if request.photos:
+            existing.photos = request.photos
         existing.overall_score = request.overall_score
         existing.financial_score = request.financial_score
         existing.market_score = request.market_score
@@ -605,6 +610,7 @@ async def save_property(request: SavePropertyRequest):
             days_on_market=request.days_on_market,
             source=request.source,
             source_url=request.source_url,
+            photos=request.photos,
             overall_score=request.overall_score,
             financial_score=request.financial_score,
             market_score=request.market_score,
