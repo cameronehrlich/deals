@@ -17,6 +17,23 @@ class PropertyType(str, Enum):
     TRIPLEX = "triplex"
     FOURPLEX = "fourplex"
     MULTI_FAMILY = "multi_family"
+    # Types we track but typically filter out
+    MOBILE_HOME = "mobile_home"
+    MANUFACTURED = "manufactured"
+    LAND = "land"
+    OTHER = "other"
+
+
+# Property types suitable for traditional rental investing
+INVESTABLE_PROPERTY_TYPES = {
+    PropertyType.SFH,
+    PropertyType.CONDO,
+    PropertyType.TOWNHOUSE,
+    PropertyType.DUPLEX,
+    PropertyType.TRIPLEX,
+    PropertyType.FOURPLEX,
+    PropertyType.MULTI_FAMILY,
+}
 
 
 class PropertyStatus(str, Enum):

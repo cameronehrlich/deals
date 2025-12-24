@@ -216,6 +216,7 @@ async def import_parsed_property(request: ImportParsedRequest):
     from src.models.deal import Deal, DealPipeline
     from src.models.financials import Financials, LoanTerms
     from src.agents.deal_analyzer import DealAnalyzerAgent
+    from src.data_sources.geocoder import get_geocoder
 
     aggregator = DataAggregator()
     warnings = []
@@ -237,6 +238,25 @@ async def import_parsed_property(request: ImportParsedRequest):
             PropertyType.SFH
         )
 
+        # Geocode the address to get coordinates
+        latitude = None
+        longitude = None
+        try:
+            geocoder = get_geocoder()
+            geo_result = await geocoder.geocode(
+                address=request.address,
+                city=request.city,
+                state=request.state,
+                zip_code=request.zip_code,
+            )
+            if geo_result:
+                latitude = geo_result.latitude
+                longitude = geo_result.longitude
+            else:
+                warnings.append("Could not geocode address - location features unavailable")
+        except Exception as e:
+            warnings.append(f"Geocoding failed: {str(e)}")
+
         # Create property object from parsed data
         prop_id = f"{request.source}_{hash(request.source_url or request.address) % 1000000:06d}"
         property = Property(
@@ -245,6 +265,8 @@ async def import_parsed_property(request: ImportParsedRequest):
             city=request.city,
             state=request.state,
             zip_code=request.zip_code,
+            latitude=latitude,
+            longitude=longitude,
             list_price=request.list_price,
             property_type=prop_type,
             bedrooms=request.bedrooms,

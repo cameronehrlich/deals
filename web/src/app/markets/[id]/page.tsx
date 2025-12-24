@@ -15,17 +15,44 @@ import {
   DollarSign,
   Shield,
   Clock,
+  Database,
+  CheckCircle,
+  RefreshCw,
+  Loader2,
+  AlertCircle,
 } from "lucide-react";
 import { api, MarketDetail } from "@/lib/api";
 import {
   formatCurrency,
   formatPercent,
+  formatPercentValue,
   formatNumber,
   getScoreBadge,
   cn,
 } from "@/lib/utils";
 import { ScoreGauge } from "@/components/ScoreGauge";
 import { LoadingPage } from "@/components/LoadingSpinner";
+
+// Data source display info
+const DATA_SOURCE_INFO: Record<string, { label: string; color: string; description: string }> = {
+  redfin: { label: "Redfin", color: "bg-red-100 text-red-700", description: "Housing prices & trends" },
+  bls: { label: "BLS", color: "bg-blue-100 text-blue-700", description: "Employment data" },
+  census: { label: "Census", color: "bg-purple-100 text-purple-700", description: "Demographics" },
+  hud: { label: "HUD", color: "bg-green-100 text-green-700", description: "Fair market rents" },
+  fred: { label: "FRED", color: "bg-amber-100 text-amber-700", description: "Macro economics" },
+  state_data: { label: "State", color: "bg-gray-100 text-gray-700", description: "Regulatory data" },
+};
+
+// Score to data source mapping
+const SCORE_DATA_SOURCES: Record<string, string[]> = {
+  cash_flow: ["hud", "redfin", "state_data"],
+  growth: ["census", "bls"],
+  affordability: ["census", "hud"],
+  stability: ["redfin"],
+  liquidity: ["redfin"],
+  operating_cost: ["state_data"],
+  regulatory: ["state_data"],
+};
 
 export default function MarketDetailPage() {
   const params = useParams();
@@ -34,6 +61,23 @@ export default function MarketDetailPage() {
   const [market, setMarket] = useState<MarketDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    if (!marketId || refreshing) return;
+    try {
+      setRefreshing(true);
+      setError(null);
+      await api.refreshMarketData(marketId);
+      // Re-fetch the market data after refresh
+      const data = await api.getMarket(marketId);
+      setMarket(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to refresh market data");
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   useEffect(() => {
     async function fetchMarket() {
@@ -66,21 +110,103 @@ export default function MarketDetailPage() {
     );
   }
 
-  // Helper function for score progress bar
-  const ScoreBar = ({ score, label, color }: { score: number; label: string; color: string }) => (
-    <div className="space-y-1">
-      <div className="flex justify-between text-sm">
-        <span className="text-gray-600">{label}</span>
-        <span className="font-semibold">{score.toFixed(0)}</span>
+  // Helper function for score progress bar with data source indicators
+  const ScoreBar = ({
+    score,
+    label,
+    color,
+    scoreKey,
+    dataSources,
+  }: {
+    score: number;
+    label: string;
+    color: string;
+    scoreKey?: string;
+    dataSources?: string[];
+  }) => {
+    // Get which data sources contribute to this score
+    const relevantSources = scoreKey ? SCORE_DATA_SOURCES[scoreKey] || [] : [];
+    const availableSources = relevantSources.filter(s => dataSources?.includes(s));
+    const hasAllData = relevantSources.length > 0 && availableSources.length === relevantSources.length;
+
+    return (
+      <div className="space-y-1">
+        <div className="flex justify-between text-sm">
+          <div className="flex items-center gap-2">
+            <span className="text-gray-600">{label}</span>
+            {/* Show tiny data source pills */}
+            {availableSources.length > 0 && (
+              <div className="flex gap-0.5">
+                {availableSources.map(source => {
+                  const info = DATA_SOURCE_INFO[source];
+                  return info ? (
+                    <span
+                      key={source}
+                      className={cn(
+                        "text-[9px] px-1 py-0 rounded font-medium opacity-70",
+                        info.color
+                      )}
+                      title={`${info.label}: ${info.description}`}
+                    >
+                      {info.label}
+                    </span>
+                  ) : null;
+                })}
+              </div>
+            )}
+          </div>
+          <span className="font-semibold">{score.toFixed(0)}</span>
+        </div>
+        <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all duration-500 ${color}`}
+            style={{ width: `${score}%` }}
+          />
+        </div>
       </div>
-      <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
-        <div
-          className={`h-full rounded-full transition-all duration-500 ${color}`}
-          style={{ width: `${score}%` }}
-        />
+    );
+  };
+
+  // Data completeness indicator
+  const DataCompletenessBar = ({ completeness, sources }: { completeness?: number; sources?: string[] }) => {
+    const pct = (completeness || 0) * 100;
+    return (
+      <div className="flex items-center gap-3 text-xs text-gray-500">
+        <Database className="h-3.5 w-3.5" />
+        <div className="flex-1">
+          <div className="flex justify-between mb-0.5">
+            <span>Data Completeness</span>
+            <span className="font-medium">{pct.toFixed(0)}%</span>
+          </div>
+          <div className="h-1 bg-gray-200 rounded-full overflow-hidden">
+            <div
+              className={cn(
+                "h-full rounded-full transition-all",
+                pct >= 80 ? "bg-green-500" : pct >= 50 ? "bg-amber-500" : "bg-red-400"
+              )}
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+        </div>
+        {sources && sources.length > 0 && (
+          <div className="flex gap-1">
+            {sources.map(source => {
+              const info = DATA_SOURCE_INFO[source];
+              return info ? (
+                <span
+                  key={source}
+                  className={cn("text-[9px] px-1.5 py-0.5 rounded font-medium", info.color)}
+                  title={info.description}
+                >
+                  {info.label}
+                </span>
+              ) : null;
+            })}
+          </div>
+        )}
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -93,6 +219,38 @@ export default function MarketDetailPage() {
         Back to markets
       </Link>
 
+      {/* Enrichment Pending Banner */}
+      {(market.enrichment_pending || (!market.data_sources || market.data_sources.length === 0)) && (
+        <div className="card bg-amber-50 border-amber-200 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <AlertCircle className="h-5 w-5 text-amber-600" />
+            <div>
+              <p className="font-medium text-amber-800">Market data incomplete</p>
+              <p className="text-sm text-amber-600">
+                Some data sources failed to load. Click refresh to retry.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="btn-outline text-amber-700 border-amber-300 hover:bg-amber-100 flex items-center gap-2"
+          >
+            {refreshing ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Refreshing...
+              </>
+            ) : (
+              <>
+                <RefreshCw className="h-4 w-4" />
+                Refresh Data
+              </>
+            )}
+          </button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
@@ -101,17 +259,31 @@ export default function MarketDetailPage() {
           </h1>
           <p className="text-gray-500 mt-1 flex items-center gap-2">
             <MapPin className="h-4 w-4" />
-            {market.metro}
+            {market.metro || "Metro area"}
             {market.region && ` • ${market.region}`}
           </p>
         </div>
 
-        <Link
-          href={`/deals?markets=${market.id}`}
-          className="btn-primary"
-        >
-          Find Deals in {market.name}
-        </Link>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="btn-outline flex items-center gap-2"
+            title="Refresh market data"
+          >
+            {refreshing ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+          </button>
+          <Link
+            href={`/deals?markets=${market.id}`}
+            className="btn-primary"
+          >
+            Find Deals in {market.name}
+          </Link>
+        </div>
       </div>
 
       {/* Scores - Visual Dashboard */}
@@ -128,29 +300,73 @@ export default function MarketDetailPage() {
 
         {/* Score Breakdown */}
         <div className="card lg:col-span-2">
-          <h2 className="text-lg font-semibold text-gray-900 mb-6">
-            Score Breakdown
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <ScoreBar score={market.cash_flow_score} label="Cash Flow Potential" color="bg-green-500" />
-            <ScoreBar score={market.growth_score} label="Growth Potential" color="bg-blue-500" />
-            <ScoreBar score={market.affordability_score} label="Affordability" color="bg-purple-500" />
-            <ScoreBar score={market.stability_score} label="Economic Stability" color="bg-orange-500" />
-            <ScoreBar score={market.liquidity_score} label="Market Liquidity" color="bg-cyan-500" />
-            {/* Investment Quick Stats */}
-            <div className="md:col-span-2 pt-4 border-t border-gray-100">
-              <div className="flex flex-wrap gap-4 text-sm">
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full bg-green-500" />
-                  <span className="text-gray-600">Cash Flow:</span>
-                  <span className="font-medium">{market.rent_to_price_ratio?.toFixed(2)}% rent/price</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full bg-blue-500" />
-                  <span className="text-gray-600">Growth:</span>
-                  <span className="font-medium">{market.price_change_1yr ? `${market.price_change_1yr > 0 ? "+" : ""}${market.price_change_1yr}%` : "N/A"} YoY</span>
-                </div>
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-lg font-semibold text-gray-900">
+              Score Breakdown
+            </h2>
+            {market.data_sources && market.data_sources.length > 0 && (
+              <div className="flex items-center gap-1.5 text-xs text-gray-500">
+                <CheckCircle className="h-3.5 w-3.5 text-green-500" />
+                <span>{market.data_sources.length} data sources</span>
               </div>
+            )}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <ScoreBar
+              score={market.cash_flow_score}
+              label="Cash Flow"
+              color="bg-green-500"
+              scoreKey="cash_flow"
+              dataSources={market.data_sources}
+            />
+            <ScoreBar
+              score={market.growth_score}
+              label="Growth"
+              color="bg-blue-500"
+              scoreKey="growth"
+              dataSources={market.data_sources}
+            />
+            <ScoreBar
+              score={market.affordability_score}
+              label="Affordability"
+              color="bg-purple-500"
+              scoreKey="affordability"
+              dataSources={market.data_sources}
+            />
+            <ScoreBar
+              score={market.stability_score}
+              label="Stability"
+              color="bg-orange-500"
+              scoreKey="stability"
+              dataSources={market.data_sources}
+            />
+            <ScoreBar
+              score={market.liquidity_score}
+              label="Liquidity"
+              color="bg-cyan-500"
+              scoreKey="liquidity"
+              dataSources={market.data_sources}
+            />
+            <ScoreBar
+              score={market.operating_cost_score || 50}
+              label="Operating Costs"
+              color="bg-rose-500"
+              scoreKey="operating_cost"
+              dataSources={market.data_sources}
+            />
+            <ScoreBar
+              score={market.regulatory_score || 50}
+              label="Regulatory"
+              color="bg-indigo-500"
+              scoreKey="regulatory"
+              dataSources={market.data_sources}
+            />
+            {/* Data completeness indicator */}
+            <div className="md:col-span-2 pt-4 border-t border-gray-100">
+              <DataCompletenessBar
+                completeness={market.data_completeness}
+                sources={market.data_sources}
+              />
             </div>
           </div>
         </div>
@@ -177,13 +393,13 @@ export default function MarketDetailPage() {
                 "font-semibold",
                 (market.population_growth_1yr || 0) >= 0 ? "text-green-600" : "text-red-600"
               )}>
-                {market.population_growth_1yr ? `${market.population_growth_1yr > 0 ? "+" : ""}${market.population_growth_1yr}%` : "N/A"}
+                {market.population_growth_1yr != null ? formatPercentValue(market.population_growth_1yr, true) : "N/A"}
               </span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-gray-600">5Y Growth</span>
               <span className="font-semibold">
-                {market.population_growth_5yr ? `${market.population_growth_5yr > 0 ? "+" : ""}${market.population_growth_5yr}%` : "N/A"}
+                {market.population_growth_5yr != null ? formatPercentValue(market.population_growth_5yr, true) : "N/A"}
               </span>
             </div>
             <div className="flex items-center justify-between">
@@ -225,7 +441,7 @@ export default function MarketDetailPage() {
                 Unemployment
               </span>
               <span className="font-semibold">
-                {market.unemployment_rate ? formatPercent(market.unemployment_rate) : "N/A"}
+                {market.unemployment_rate != null ? formatPercentValue(market.unemployment_rate) : "N/A"}
               </span>
             </div>
             <div className="flex items-center justify-between">
@@ -234,7 +450,7 @@ export default function MarketDetailPage() {
                 "font-semibold",
                 (market.job_growth_1yr || 0) >= 0 ? "text-green-600" : "text-red-600"
               )}>
-                {market.job_growth_1yr ? `${market.job_growth_1yr > 0 ? "+" : ""}${market.job_growth_1yr}%` : "N/A"}
+                {market.job_growth_1yr != null ? formatPercentValue(market.job_growth_1yr, true) : "N/A"}
               </span>
             </div>
             {market.major_employers.length > 0 && (
@@ -276,13 +492,13 @@ export default function MarketDetailPage() {
                 ) : (
                   <TrendingDown className="h-4 w-4" />
                 )}
-                {market.price_change_1yr ? `${market.price_change_1yr > 0 ? "+" : ""}${market.price_change_1yr}%` : "N/A"}
+                {market.price_change_1yr != null ? formatPercentValue(market.price_change_1yr, true) : "N/A"}
               </span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-gray-600">Price Change (5Y)</span>
               <span className="font-semibold">
-                {market.price_change_5yr ? `+${market.price_change_5yr}%` : "N/A"}
+                {market.price_change_5yr != null ? formatPercentValue(market.price_change_5yr, true) : "N/A"}
               </span>
             </div>
             <div className="flex items-center justify-between">
@@ -316,7 +532,7 @@ export default function MarketDetailPage() {
                 "font-semibold",
                 (market.rent_change_1yr || 0) >= 0 ? "text-green-600" : "text-red-600"
               )}>
-                {market.rent_change_1yr ? `${market.rent_change_1yr > 0 ? "+" : ""}${market.rent_change_1yr}%` : "N/A"}
+                {market.rent_change_1yr != null ? formatPercentValue(market.rent_change_1yr, true) : "N/A"}
               </span>
             </div>
             <div className="flex items-center justify-between">
@@ -325,7 +541,7 @@ export default function MarketDetailPage() {
                 "font-semibold",
                 (market.rent_to_price_ratio || 0) >= 0.7 ? "text-green-600" : "text-yellow-600"
               )}>
-                {market.rent_to_price_ratio ? `${market.rent_to_price_ratio.toFixed(2)}%` : "N/A"}
+                {market.rent_to_price_ratio != null ? formatPercentValue(market.rent_to_price_ratio) : "N/A"}
               </span>
             </div>
             <div className="flex items-center justify-between">
@@ -374,10 +590,10 @@ export default function MarketDetailPage() {
           </div>
         </div>
 
-        {/* Regulatory */}
+        {/* Regulatory & Costs */}
         <div className="card">
           <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wide mb-4">
-            Regulatory & Risk
+            Regulatory & Costs
           </h3>
           <div className="space-y-4">
             <div className="flex items-center justify-between">
@@ -385,17 +601,37 @@ export default function MarketDetailPage() {
                 <Shield className="h-4 w-4" />
                 Landlord Friendly
               </span>
-              <span className={cn(
-                "font-semibold",
-                market.landlord_friendly ? "text-green-600" : "text-red-600"
-              )}>
-                {market.landlord_friendly ? "Yes" : "No"}
-              </span>
+              <div className="flex items-center gap-2">
+                {market.landlord_friendly_score && (
+                  <span className="text-xs text-gray-500">{market.landlord_friendly_score}/10</span>
+                )}
+                <span className={cn(
+                  "font-semibold",
+                  market.landlord_friendly ? "text-green-600" : "text-red-600"
+                )}>
+                  {market.landlord_friendly ? "Yes" : "No"}
+                </span>
+              </div>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-gray-600">Property Tax Rate</span>
-              <span className="font-semibold">
+              <span className={cn(
+                "font-semibold",
+                market.property_tax_rate && market.property_tax_rate < 0.01 ? "text-green-600" :
+                market.property_tax_rate && market.property_tax_rate > 0.02 ? "text-red-600" :
+                "text-gray-900"
+              )}>
                 {market.property_tax_rate ? formatPercent(market.property_tax_rate) : "N/A"}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-gray-600">State Income Tax</span>
+              <span className={cn(
+                "font-semibold",
+                market.has_state_income_tax === false ? "text-green-600" : "text-gray-600"
+              )}>
+                {market.has_state_income_tax === false ? "None" :
+                 market.has_state_income_tax === true ? "Yes" : "N/A"}
               </span>
             </div>
             <div className="flex items-center justify-between">
@@ -408,6 +644,18 @@ export default function MarketDetailPage() {
                 {market.insurance_risk || "N/A"}
               </span>
             </div>
+            {market.insurance_risk_factors && market.insurance_risk_factors.length > 0 && (
+              <div className="pt-2 border-t border-gray-100">
+                <span className="text-xs text-gray-500">Risk Factors:</span>
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {market.insurance_risk_factors.map((factor) => (
+                    <span key={factor} className="text-xs px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded capitalize">
+                      {factor}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

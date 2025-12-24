@@ -19,6 +19,50 @@ import httpx
 
 BASE_URL = "https://us-real-estate.p.rapidapi.com"
 
+# Map raw API property types to standardized values
+PROPERTY_TYPE_MAP = {
+    # Standard residential
+    "single_family": "single_family",
+    "single_family_home": "single_family",
+    "house": "single_family",
+    "condo": "condo",
+    "condos": "condo",
+    "apartment": "condo",
+    "townhouse": "townhouse",
+    "townhome": "townhouse",
+    "row_house": "townhouse",
+    "duplex": "duplex",
+    "triplex": "triplex",
+    "quadruplex": "fourplex",
+    "fourplex": "fourplex",
+    "multi_family": "multi_family",
+    "multi-family": "multi_family",
+    # Mobile/manufactured - filtered out
+    "mobile": "mobile_home",
+    "mobile_home": "mobile_home",
+    "manufactured": "manufactured",
+    "manufactured_home": "manufactured",
+    "trailer": "mobile_home",
+    # Land - filtered out
+    "land": "land",
+    "lot": "land",
+    "lots": "land",
+    "vacant_land": "land",
+    "farm": "land",
+    # Other
+    "other": "other",
+    "unknown": "other",
+}
+
+
+def normalize_property_type(raw_type: str) -> str:
+    """Convert raw API property type to our standardized type."""
+    if not raw_type:
+        return "single_family"
+    normalized = raw_type.lower().strip().replace(" ", "_").replace("-", "_")
+    return PROPERTY_TYPE_MAP.get(normalized, "other")
+
+
 # Cache TTLs in seconds
 CACHE_TTL = {
     "property_search": 3600,      # 1 hour - listings change often
@@ -442,7 +486,7 @@ class USRealEstateClient:
                     bedrooms=description.get("beds", 0) or 0,
                     bathrooms=description.get("baths", 0) or 0,
                     sqft=description.get("sqft"),
-                    property_type=description.get("type", "single_family"),
+                    property_type=normalize_property_type(description.get("type", "")),
                     days_on_market=item.get("list_date_dom"),
                     photos=[p.get("href", "") for p in item.get("photos", [])[:5]],
                     year_built=description.get("year_built"),
@@ -513,7 +557,7 @@ class USRealEstateClient:
                 bedrooms=description.get("beds", 0) or 0,
                 bathrooms=description.get("baths", 0) or 0,
                 sqft=description.get("sqft"),
-                property_type=description.get("type", ""),
+                property_type=normalize_property_type(description.get("type", "")),
                 year_built=description.get("year_built"),
                 lot_sqft=description.get("lot_sqft"),
                 stories=description.get("stories"),
@@ -619,7 +663,7 @@ class USRealEstateClient:
                     bedrooms=description.get("beds", 0) or 0,
                     bathrooms=description.get("baths", 0) or 0,
                     sqft=description.get("sqft"),
-                    property_type=description.get("type", ""),
+                    property_type=normalize_property_type(description.get("type", "")),
                     days_on_market=item.get("list_date_dom"),
                 )
                 rentals.append(rental)

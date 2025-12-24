@@ -14,33 +14,49 @@ interface ImageCarouselProps {
  * Upgrade image URL to higher resolution.
  * Realtor.com CDN (rdcpix.com) supports size modifications:
  * - Replace dimension parameters (w480_h360 -> w1024_h768)
- * - Replace size suffixes (-s, -m, -l, -o)
+ * - Replace size suffixes at end of filename (s, m -> l for large, o for original)
+ * URL formats:
+ *   - ...abc123-w480_h360.jpg
+ *   - ...abc123l-m821058964s.jpg (s=small, m=medium, l=large, o=original)
  */
 function getHighResUrl(url: string): string {
   if (!url) return url;
 
-  // Handle rdcpix.com URLs with dimension parameters
-  // e.g., ...abc123-w480_h360.jpg -> ...abc123-w1024_h768.jpg
+  // Handle rdcpix.com URLs
   if (url.includes("rdcpix.com")) {
-    // Replace common thumbnail sizes with larger versions
-    return url
-      .replace(/-w\d+_h\d+/g, "-w1024_h768")
-      .replace(/-m\d+x\d*w/g, "-m1024x768w")
-      .replace(/-s\.jpg/g, "-l.jpg")
-      .replace(/-m\.jpg/g, "-l.jpg");
+    let upgraded = url;
+
+    // Pattern 1: dimension parameters (w480_h360 -> w1024_h768)
+    upgraded = upgraded.replace(/-w\d+_h\d+/g, "-w1024_h768");
+    upgraded = upgraded.replace(/-m\d+x\d*w/g, "-m1024x768w");
+
+    // Pattern 2: size suffix at end of filename before extension
+    // e.g., ...l-m821058964s.jpg -> ...l-m821058964o.jpg (s/m -> o for original)
+    upgraded = upgraded.replace(/([a-z0-9])s\.(jpg|jpeg|png|webp)$/i, "$1o.$2");
+    upgraded = upgraded.replace(/([a-z0-9])m\.(jpg|jpeg|png|webp)$/i, "$1o.$2");
+
+    // Pattern 3: standalone size suffix
+    upgraded = upgraded.replace(/-s\.(jpg|jpeg|png|webp)$/i, "-o.$1");
+    upgraded = upgraded.replace(/-m\.(jpg|jpeg|png|webp)$/i, "-o.$1");
+
+    return upgraded;
   }
 
   // Handle other CDNs that use query params
   if (url.includes("?")) {
-    const urlObj = new URL(url);
-    // Try to upgrade common size parameters
-    if (urlObj.searchParams.has("w")) {
-      urlObj.searchParams.set("w", "1024");
+    try {
+      const urlObj = new URL(url);
+      // Try to upgrade common size parameters
+      if (urlObj.searchParams.has("w")) {
+        urlObj.searchParams.set("w", "1024");
+      }
+      if (urlObj.searchParams.has("h")) {
+        urlObj.searchParams.set("h", "768");
+      }
+      return urlObj.toString();
+    } catch {
+      return url;
     }
-    if (urlObj.searchParams.has("h")) {
-      urlObj.searchParams.set("h", "768");
-    }
-    return urlObj.toString();
   }
 
   return url;

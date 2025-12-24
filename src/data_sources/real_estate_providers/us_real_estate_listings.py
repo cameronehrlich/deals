@@ -17,6 +17,50 @@ import httpx
 from .base import BaseProvider, PropertyListing, PropertyDetail, ProviderUsage
 
 
+# Map raw API property types to standardized values
+PROPERTY_TYPE_MAP = {
+    # Standard residential
+    "single_family": "single_family",
+    "single_family_home": "single_family",
+    "house": "single_family",
+    "condo": "condo",
+    "condos": "condo",
+    "apartment": "condo",
+    "townhouse": "townhouse",
+    "townhome": "townhouse",
+    "row_house": "townhouse",
+    "duplex": "duplex",
+    "triplex": "triplex",
+    "quadruplex": "fourplex",
+    "fourplex": "fourplex",
+    "multi_family": "multi_family",
+    "multi-family": "multi_family",
+    # Mobile/manufactured - we'll filter these out
+    "mobile": "mobile_home",
+    "mobile_home": "mobile_home",
+    "manufactured": "manufactured",
+    "manufactured_home": "manufactured",
+    "trailer": "mobile_home",
+    # Land - we'll filter these out
+    "land": "land",
+    "lot": "land",
+    "lots": "land",
+    "vacant_land": "land",
+    "farm": "land",
+    # Other
+    "other": "other",
+    "unknown": "other",
+}
+
+
+def normalize_property_type(raw_type: str) -> str:
+    """Convert raw API property type to our standardized type."""
+    if not raw_type:
+        return "single_family"
+    normalized = raw_type.lower().strip().replace(" ", "_").replace("-", "_")
+    return PROPERTY_TYPE_MAP.get(normalized, "other")
+
+
 # Usage tracking file
 USAGE_FILE = Path(__file__).parent.parent.parent.parent / ".api_usage_listings.json"
 
@@ -245,18 +289,46 @@ class USRealEstateListingsProvider(BaseProvider):
         """Parse API response into PropertyListing."""
         location = item.get("location", {})
         address = location.get("address", {})
+        coordinate = address.get("coordinate", {}) or location.get("coordinate", {})
         desc = item.get("description", {})
 
-        # Extract photos
+        # Extract photos - deduplicate by image ID to avoid showing same image twice
+        def get_image_id(url: str) -> str:
+            """Extract unique image ID from CDN URL for deduplication."""
+            if not url:
+                return ""
+            # Remove query params first
+            base_url = url.split("?")[0]
+            # Remove size suffixes to get base image ID
+            # e.g., "...abc123-w480_h360.jpg" and "...abc123-w1024_h768.jpg" -> same base
+            import re
+            # Remove common size patterns from the filename
+            normalized = re.sub(r'-[wm]?\d+[x_]?h?\d*w?(?=\.)', '', base_url)
+            # Also remove -s, -m, -l, -o size suffixes
+            normalized = re.sub(r'-[smlo](?=\.jpg|\.png|\.webp)', '', normalized, flags=re.IGNORECASE)
+            return normalized
+
         photos = []
+        seen_ids = set()
         primary_photo = None
-        if item.get("primary_photo", {}).get("href"):
-            primary_photo = item["primary_photo"]["href"]
-            photos.append(primary_photo)
+
+        # First add photos from the photos array (usually higher quality)
         for photo in item.get("photos", [])[:10]:
             href = photo.get("href")
-            if href and href not in photos:
-                photos.append(href)
+            if href:
+                img_id = get_image_id(href)
+                if img_id not in seen_ids:
+                    seen_ids.add(img_id)
+                    photos.append(href)
+
+        # Only add primary_photo if it's not already in the list
+        if item.get("primary_photo", {}).get("href"):
+            primary_photo = item["primary_photo"]["href"]
+            img_id = get_image_id(primary_photo)
+            if img_id not in seen_ids:
+                # Insert at beginning since it's the primary
+                photos.insert(0, primary_photo)
+                seen_ids.add(img_id)
 
         price = item.get("list_price", 0) or 0
         sqft = desc.get("sqft")
@@ -271,7 +343,7 @@ class USRealEstateListingsProvider(BaseProvider):
             bedrooms=desc.get("beds", 0) or 0,
             bathrooms=desc.get("baths", 0) or 0,
             sqft=sqft,
-            property_type=desc.get("type", "single_family"),
+            property_type=normalize_property_type(desc.get("type", "")),
             year_built=desc.get("year_built"),
             lot_sqft=desc.get("lot_sqft"),
             days_on_market=None,  # Not directly available
@@ -280,6 +352,8 @@ class USRealEstateListingsProvider(BaseProvider):
             source_url=item.get("href"),
             hoa_fee=item.get("hoa", {}).get("fee") if item.get("hoa") else None,
             price_per_sqft=round(price / sqft, 2) if sqft and price else None,
+            latitude=coordinate.get("lat"),
+            longitude=coordinate.get("lon"),
             provider=self.name,
         )
 

@@ -6,7 +6,7 @@ Context for Claude Code when working on this project.
 
 Real estate investment analysis platform. Search live listings, analyze deals, save favorites.
 
-**Stack:** Python 3.10+ / FastAPI / Next.js 14 / TypeScript / Tailwind / SQLite / Electron
+**Stack:** Python 3.10+ / FastAPI / Next.js 14 / TypeScript / Tailwind / SQLite (dev) / Postgres (prod) / Electron
 
 ## Architecture
 
@@ -32,12 +32,16 @@ src/
 
 api/
 ├── main.py              # FastAPI app, CORS, router registration
+├── jobs/
+│   ├── worker.py        # Background job worker (polling or run_once)
+│   └── handlers.py      # Job handlers: enrich_market, enrich_property
 └── routes/
     ├── markets.py       # GET /api/markets
     ├── deals.py         # GET /api/deals/search
     ├── properties.py    # GET /api/properties/search (live API)
     ├── import_property.py  # POST /api/import/url, /parsed, /income/{zip}
     ├── saved.py         # GET/POST /api/saved/properties, /markets
+    ├── jobs.py          # Background job management, /api/jobs/process
     └── analysis.py      # POST /api/analysis/calculate
 
 web/src/
@@ -117,6 +121,44 @@ Properties flow through three tiers of increasing data richness:
 - Noise/Schools: 1 week
 - Flood Zone: 1 year
 
+## Background Jobs
+
+DB-backed job queue for async tasks like market/property enrichment.
+
+**Job Types:**
+- `enrich_market` - Fetch data from Redfin, BLS, Census, HUD for a market
+- `enrich_property` - Geocode, get Walk Score, flood zone, run analysis
+
+**Key Endpoints:**
+- `POST /api/jobs/enqueue-markets` - Queue enrichment for favorite markets
+- `POST /api/jobs/enqueue-property` - Create property + queue enrichment
+- `POST /api/jobs/process?limit=10` - Process pending jobs (for cron)
+- `GET /api/jobs` - List jobs with status
+- `GET /api/jobs/stats` - Queue statistics
+
+**Local Development:**
+```bash
+# Run worker continuously (polls every 2s)
+python -m api.jobs.worker
+```
+
+**Production (Vercel):**
+The worker can't run continuously on serverless. Use cron to call `/api/jobs/process`:
+
+```json
+// vercel.json
+{
+  "crons": [
+    {
+      "path": "/api/jobs/process",
+      "schedule": "*/5 * * * *"
+    }
+  ]
+}
+```
+
+Note: Vercel Cron requires Pro plan. Alternatively, use external cron service (cron-job.org).
+
 ## Running Locally
 
 ```bash
@@ -137,6 +179,7 @@ RAPIDAPI_KEY=xxx          # Required for live property search
 WALKSCORE_API_KEY=xxx     # Required for Walk Score (official API)
 FRED_API_KEY=xxx          # Optional, macro data
 RENTCAST_API_KEY=xxx      # Optional, rent estimates
+BLS_API_KEY=xxx           # Optional, metro employment data (get free at data.bls.gov/registrationEngine)
 ```
 
 ## Key Files by Feature
@@ -147,6 +190,8 @@ RENTCAST_API_KEY=xxx      # Optional, rent estimates
 | Property analysis | `api/routes/import_property.py`, `src/models/financials.py` |
 | Saved properties | `api/routes/saved.py`, `src/db/sqlite_repository.py` |
 | Market favorites | `api/routes/saved.py`, `web/src/app/markets/page.tsx` |
+| Background jobs | `api/routes/jobs.py`, `api/jobs/worker.py`, `api/jobs/handlers.py` |
+| Market enrichment | `src/data_sources/aggregator.py`, `api/jobs/handlers.py` |
 | Income data | `src/data_sources/income_data.py`, `api/routes/import_property.py` |
 | URL scraping | `electron/scraper.js`, `src/data_sources/url_parser.py` |
 | Image carousel | `web/src/components/ImageCarousel.tsx` |
@@ -154,6 +199,7 @@ RENTCAST_API_KEY=xxx      # Optional, rent estimates
 | Property analysis UI | `web/src/components/PropertyAnalysisView.tsx` (shared for deals/saved) |
 | Walk Score | `src/data_sources/walkscore.py`, `api/routes/import_property.py` |
 | Flood zone | `src/data_sources/fema_flood.py`, `api/routes/import_property.py` |
+| Geocoding | `src/data_sources/geocoder.py` (Census Geocoder API, free, no key required) |
 | Location enrichment | `api/routes/saved.py` (`/refresh-location`, `/reanalyze`) |
 
 ## Common Tasks

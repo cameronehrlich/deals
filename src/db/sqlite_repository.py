@@ -1,6 +1,6 @@
 """SQLite implementation of the DealRepository."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List
 import json
 
@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from src.db.repository import DealRepository
 from src.db.models import (
-    MarketDB, SavedPropertyDB, SearchCacheDB, IncomeCacheDB,
+    MarketDB, SavedPropertyDB, SearchCacheDB, IncomeCacheDB, JobDB,
     get_engine, get_session, init_database, DEFAULT_FAVORITE_MARKETS
 )
 from src.db.cache import CacheManager
@@ -322,6 +322,18 @@ class SQLiteRepository(DealRepository):
             .all()
         )
 
+    def get_all_markets_sorted(self) -> List[MarketDB]:
+        """Get all markets sorted by favorites first, then by score."""
+        return (
+            self.session.query(MarketDB)
+            .order_by(
+                MarketDB.is_favorite.desc(),
+                MarketDB.overall_score.desc().nullslast(),
+                MarketDB.name.asc()
+            )
+            .all()
+        )
+
     def add_market(
         self,
         name: str,
@@ -441,6 +453,142 @@ class SQLiteRepository(DealRepository):
             prop.updated_at = datetime.utcnow()
             self.session.commit()
         return prop
+
+    # ==================== Jobs ====================
+
+    def enqueue_job(
+        self,
+        job_type: str,
+        payload: dict = None,
+        priority: int = 0,
+    ) -> JobDB:
+        """Add a job to the queue."""
+        from src.db.models import generate_uuid
+        job = JobDB(
+            id=generate_uuid(),
+            job_type=job_type,
+            payload=payload or {},
+            priority=priority,
+            status='pending',
+        )
+        self.session.add(job)
+        self.session.commit()
+        return job
+
+    def get_pending_job(self) -> Optional[JobDB]:
+        """Get the next pending job (highest priority, oldest first)."""
+        return (
+            self.session.query(JobDB)
+            .filter_by(status='pending')
+            .order_by(JobDB.priority.desc(), JobDB.created_at.asc())
+            .first()
+        )
+
+    def get_job(self, job_id: str) -> Optional[JobDB]:
+        """Get a job by ID."""
+        return self.session.query(JobDB).filter_by(id=job_id).first()
+
+    def get_jobs(
+        self,
+        status: Optional[str] = None,
+        job_type: Optional[str] = None,
+        limit: int = 50,
+    ) -> List[JobDB]:
+        """Get jobs with optional filters."""
+        query = self.session.query(JobDB)
+        if status:
+            query = query.filter_by(status=status)
+        if job_type:
+            query = query.filter_by(job_type=job_type)
+        return (
+            query
+            .order_by(JobDB.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+
+    def update_job_status(
+        self,
+        job_id: str,
+        status: str,
+        message: str = None,
+        progress: int = None,
+        error: str = None,
+        result: dict = None,
+    ) -> Optional[JobDB]:
+        """Update a job's status."""
+        job = self.get_job(job_id)
+        if not job:
+            return None
+
+        job.status = status
+        if message is not None:
+            job.message = message
+        if progress is not None:
+            job.progress = progress
+        if error is not None:
+            job.error = error
+        if result is not None:
+            job.result = result
+
+        if status == 'running' and job.started_at is None:
+            job.started_at = datetime.utcnow()
+            job.attempts += 1
+        elif status in ('completed', 'failed'):
+            job.completed_at = datetime.utcnow()
+
+        self.session.commit()
+        return job
+
+    def cancel_job(self, job_id: str) -> Optional[JobDB]:
+        """Cancel a pending job."""
+        job = self.get_job(job_id)
+        if job and job.status == 'pending':
+            job.status = 'cancelled'
+            job.completed_at = datetime.utcnow()
+            self.session.commit()
+        return job
+
+    def cancel_jobs_by_type(self, job_type: str) -> int:
+        """Cancel all pending jobs of a given type."""
+        jobs = (
+            self.session.query(JobDB)
+            .filter_by(job_type=job_type, status='pending')
+            .all()
+        )
+        for job in jobs:
+            job.status = 'cancelled'
+            job.completed_at = datetime.utcnow()
+        self.session.commit()
+        return len(jobs)
+
+    def cleanup_old_jobs(self, days: int = 7) -> int:
+        """Delete completed/failed/cancelled jobs older than N days."""
+        cutoff = datetime.utcnow() - timedelta(days=days)
+        deleted = (
+            self.session.query(JobDB)
+            .filter(
+                JobDB.status.in_(['completed', 'failed', 'cancelled']),
+                JobDB.completed_at < cutoff
+            )
+            .delete(synchronize_session=False)
+        )
+        self.session.commit()
+        return deleted
+
+    def get_job_stats(self) -> dict:
+        """Get job queue statistics."""
+        pending = self.session.query(JobDB).filter_by(status='pending').count()
+        running = self.session.query(JobDB).filter_by(status='running').count()
+        completed = self.session.query(JobDB).filter_by(status='completed').count()
+        failed = self.session.query(JobDB).filter_by(status='failed').count()
+        return {
+            'pending': pending,
+            'running': running,
+            'completed': completed,
+            'failed': failed,
+            'total': pending + running + completed + failed,
+        }
 
     # ==================== Stats ====================
 

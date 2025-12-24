@@ -35,6 +35,8 @@ class PropertyListingResponse(BaseModel):
     year_built: Optional[int] = None
     price_per_sqft: Optional[float] = None
     hoa_fee: Optional[float] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
 
 
 class ApiUsageResponse(BaseModel):
@@ -91,6 +93,8 @@ def _listing_to_response(listing: PropertyListing) -> PropertyListingResponse:
         year_built=listing.year_built,
         price_per_sqft=listing.price_per_sqft,
         hoa_fee=listing.hoa_fee,
+        latitude=listing.latitude,
+        longitude=listing.longitude,
     )
 
 
@@ -153,10 +157,18 @@ async def search_properties(
 
         usage = provider.get_usage()
 
-        # Filter out properties with missing required fields
+        # Property types to exclude (mobile homes, manufactured, land)
+        excluded_types = {"mobile_home", "manufactured", "land", "other"}
+
+        # Minimum price to filter out obvious data errors (land lots, auction starting bids)
+        min_valid_price = 10000
+
+        # Filter out properties with missing required fields, excluded types, or suspiciously low prices
         valid_properties = [
             p for p in properties
             if p.address and p.city and p.state and p.zip_code
+            and p.property_type not in excluded_types
+            and p.price >= min_valid_price
         ]
 
         return PropertySearchResponse(

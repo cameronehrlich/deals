@@ -147,6 +147,37 @@ export default function SavedPropertyDetailPage({
     fetchData();
   }, [propertyId]);
 
+  // Auto-fetch location data if property has no location data
+  // The backend will geocode if coordinates are missing
+  useEffect(() => {
+    async function autoFetchLocationData() {
+      if (!savedProperty) return;
+
+      // Check if we already have location data
+      const hasLocationData = savedProperty.location_data && (
+        savedProperty.location_data.walk_score !== undefined ||
+        savedProperty.location_data.flood_zone ||
+        savedProperty.location_data.schools?.length
+      );
+
+      // Auto-fetch if no location data (backend will geocode if needed)
+      if (!hasLocationData && !locationLoading) {
+        try {
+          setLocationLoading(true);
+          const updated = await api.refreshPropertyLocationData(savedProperty.id);
+          setSavedProperty(updated);
+        } catch (err) {
+          console.error("Failed to auto-fetch location data:", err);
+          // Silently fail - user can manually refresh if needed
+        } finally {
+          setLocationLoading(false);
+        }
+      }
+    }
+
+    autoFetchLocationData();
+  }, [savedProperty?.id, savedProperty?.location_data]);
+
   // Helper function to calculate mortgage payment
   const calculateMortgagePayment = (principal: number, annualRate: number, years: number = 30) => {
     if (principal <= 0) return 0;
@@ -632,34 +663,61 @@ export default function SavedPropertyDetailPage({
             </div>
           )}
 
-          {/* Location Refresh */}
-          {savedProperty.latitude && savedProperty.longitude && (
-            <div className="card bg-gray-50">
-              <h3 className="text-sm font-semibold text-gray-700 mb-3">Location Data</h3>
-              <button
-                onClick={handleRefreshLocation}
-                disabled={locationLoading}
-                className="btn-outline w-full text-sm flex items-center justify-center gap-2"
-              >
-                {locationLoading ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Refreshing...
-                  </>
-                ) : (
-                  <>
-                    <MapPin className="h-4 w-4" />
-                    Refresh Location Data
-                  </>
+          {/* Location Data Status */}
+          <div className="card bg-gray-50">
+            <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+              <MapPin className="h-4 w-4" />
+              Location Data
+            </h3>
+            {locationLoading ? (
+              <div className="flex items-center justify-center gap-2 py-3 text-sm text-gray-600">
+                <Loader2 className="h-4 w-4 animate-spin text-primary-500" />
+                <span>Loading location insights...</span>
+              </div>
+            ) : locationData ? (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-500">Status</span>
+                  <span className="text-green-600 font-medium flex items-center gap-1">
+                    <CheckCircle className="h-3.5 w-3.5" />
+                    Loaded
+                  </span>
+                </div>
+                {savedProperty.location_data_fetched && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-500">Updated</span>
+                    <span className="text-gray-700">
+                      {new Date(savedProperty.location_data_fetched).toLocaleDateString()}
+                    </span>
+                  </div>
                 )}
-              </button>
-              {savedProperty.location_data_fetched && (
-                <p className="text-xs text-gray-500 mt-2 text-center">
-                  Last updated: {new Date(savedProperty.location_data_fetched).toLocaleDateString()}
+                <button
+                  onClick={handleRefreshLocation}
+                  disabled={locationLoading}
+                  className="w-full text-xs text-gray-500 hover:text-primary-600 flex items-center justify-center gap-1 mt-2 pt-2 border-t"
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  Refresh data
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-sm text-gray-500">
+                  {savedProperty.latitude && savedProperty.longitude
+                    ? "Location data not yet fetched for this property."
+                    : "Click to geocode address and fetch location data."}
                 </p>
-              )}
-            </div>
-          )}
+                <button
+                  onClick={handleRefreshLocation}
+                  disabled={locationLoading}
+                  className="btn-outline w-full text-sm flex items-center justify-center gap-2"
+                >
+                  <MapPin className="h-4 w-4" />
+                  Fetch Location Data
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Main Content */}
@@ -1055,49 +1113,55 @@ export default function SavedPropertyDetailPage({
             </div>
           )}
 
+          {/* Location Insights Loading State */}
+          {locationLoading && !locationData && savedProperty.latitude && savedProperty.longitude && (
+            <div className="card border-primary-200 bg-primary-50">
+              <div className="flex items-center justify-center gap-3 py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-primary-600" />
+                <div>
+                  <p className="font-medium text-primary-900">Loading Location Insights</p>
+                  <p className="text-sm text-primary-700">Fetching walk scores, schools, flood zone data...</p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Walk Score */}
-          {(locationData?.walk_score || locationLoading) && (
+          {locationData?.walk_score !== undefined && (
             <div className="card">
               <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
                 <Footprints className="h-5 w-5" />
                 Walk Score
               </h3>
-              {locationLoading ? (
-                <div className="flex items-center justify-center py-8 text-gray-500">
-                  <div className="animate-spin h-5 w-5 border-2 border-primary-500 border-t-transparent rounded-full mr-2" />
-                  Loading walk scores...
+              <div className="grid grid-cols-3 gap-4">
+                <div className="text-center p-4 bg-gray-50 rounded-lg">
+                  <Footprints className="h-6 w-6 mx-auto mb-2 text-gray-600" />
+                  <p className="text-3xl font-bold text-primary-600">
+                    {locationData?.walk_score ?? "N/A"}
+                  </p>
+                  <p className="text-sm text-gray-500">
+                    {locationData?.walk_description || "Walk Score"}
+                  </p>
                 </div>
-              ) : (
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="text-center p-4 bg-gray-50 rounded-lg">
-                    <Footprints className="h-6 w-6 mx-auto mb-2 text-gray-600" />
-                    <p className="text-3xl font-bold text-primary-600">
-                      {locationData?.walk_score ?? "N/A"}
-                    </p>
-                    <p className="text-sm text-gray-500">
-                      {locationData?.walk_description || "Walk Score"}
-                    </p>
-                  </div>
-                  <div className="text-center p-4 bg-gray-50 rounded-lg">
-                    <Train className="h-6 w-6 mx-auto mb-2 text-gray-600" />
-                    <p className="text-3xl font-bold text-blue-600">
-                      {locationData?.transit_score ?? "N/A"}
-                    </p>
-                    <p className="text-sm text-gray-500">
-                      {locationData?.transit_description || "Transit Score"}
-                    </p>
-                  </div>
-                  <div className="text-center p-4 bg-gray-50 rounded-lg">
-                    <Bike className="h-6 w-6 mx-auto mb-2 text-gray-600" />
-                    <p className="text-3xl font-bold text-green-600">
-                      {locationData?.bike_score ?? "N/A"}
-                    </p>
-                    <p className="text-sm text-gray-500">
-                      {locationData?.bike_description || "Bike Score"}
-                    </p>
-                  </div>
+                <div className="text-center p-4 bg-gray-50 rounded-lg">
+                  <Train className="h-6 w-6 mx-auto mb-2 text-gray-600" />
+                  <p className="text-3xl font-bold text-blue-600">
+                    {locationData?.transit_score ?? "N/A"}
+                  </p>
+                  <p className="text-sm text-gray-500">
+                    {locationData?.transit_description || "Transit Score"}
+                  </p>
                 </div>
-              )}
+                <div className="text-center p-4 bg-gray-50 rounded-lg">
+                  <Bike className="h-6 w-6 mx-auto mb-2 text-gray-600" />
+                  <p className="text-3xl font-bold text-green-600">
+                    {locationData?.bike_score ?? "N/A"}
+                  </p>
+                  <p className="text-sm text-gray-500">
+                    {locationData?.bike_description || "Bike Score"}
+                  </p>
+                </div>
+              </div>
             </div>
           )}
 

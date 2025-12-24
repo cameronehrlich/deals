@@ -82,6 +82,9 @@ class SavedPropertyResponse(BaseModel):
     # Custom scenarios
     custom_scenarios: Optional[List[dict]] = None
 
+    # Full analysis data (financials, score, pros/cons)
+    analysis_data: Optional[dict] = None
+
     # Pipeline
     pipeline_status: str = "analyzed"
     is_favorite: bool = False
@@ -174,6 +177,7 @@ class MetroSuggestion(BaseModel):
     metro: str
     median_price: Optional[float] = None
     median_rent: Optional[float] = None
+    has_full_support: bool = False  # Has HUD rent data
 
 
 # ==================== Helper Functions ====================
@@ -209,6 +213,7 @@ def build_property_response(p) -> SavedPropertyResponse:
         cap_rate=p.cap_rate,
         location_data=getattr(p, 'location_data', None),
         custom_scenarios=getattr(p, 'custom_scenarios', None),
+        analysis_data=getattr(p, 'analysis_data', None),
         pipeline_status=p.pipeline_status or "analyzed",
         is_favorite=p.is_favorite or False,
         notes=p.notes,
@@ -221,9 +226,64 @@ def build_property_response(p) -> SavedPropertyResponse:
 
 
 def build_market_response(m) -> MarketResponse:
-    """Build MarketResponse from a MarketDB model, extracting stored market_data."""
+    """Build MarketResponse from a MarketDB model, computing scores on-demand from market_data."""
+    from src.models.market import Market, MarketMetrics, MarketTrend
+
     # Extract market data from stored JSON if available
     market_data = m.market_data or {}
+
+    # Compute scores on-demand if we have market data
+    overall_score = 0.0
+    cash_flow_score = 0.0
+    growth_score = 0.0
+
+    if market_data:
+        try:
+            # Build Market model from stored data
+            market = Market(
+                id=m.id,
+                name=m.name,
+                state=m.state,
+                metro=m.metro or market_data.get("metro", ""),
+                region=market_data.get("region"),
+                population=market_data.get("population"),
+                population_growth_1yr=market_data.get("population_growth_1yr"),
+                population_growth_5yr=market_data.get("population_growth_5yr"),
+                unemployment_rate=market_data.get("unemployment_rate"),
+                job_growth_1yr=market_data.get("job_growth_yoy") or market_data.get("job_growth_1yr"),
+                labor_force=market_data.get("labor_force"),
+                major_employers=market_data.get("major_employers", []),
+                median_household_income=market_data.get("median_household_income"),
+                median_home_price=market_data.get("median_sale_price") or market_data.get("median_home_price"),
+                median_rent=market_data.get("fmr_2br") or market_data.get("median_rent"),
+                avg_rent_to_price=market_data.get("rent_to_price_ratio") or market_data.get("avg_rent_to_price"),
+                price_change_1yr=market_data.get("price_change_yoy") or market_data.get("price_change_1yr"),
+                price_change_5yr=market_data.get("price_change_5yr"),
+                rent_change_1yr=market_data.get("rent_change_1yr"),
+                months_of_inventory=market_data.get("months_of_supply") or market_data.get("months_of_inventory"),
+                days_on_market_avg=market_data.get("days_on_market") or market_data.get("days_on_market_avg"),
+                sale_to_list_ratio=market_data.get("sale_to_list_ratio"),
+                pct_sold_above_list=market_data.get("pct_sold_above_list"),
+                pct_sold_below_list=market_data.get("pct_sold_below_list"),
+                landlord_friendly=market_data.get("landlord_friendly", True),
+                landlord_friendly_score=market_data.get("landlord_friendly_score"),
+                property_tax_rate=market_data.get("avg_property_tax_rate") or market_data.get("property_tax_rate"),
+                has_state_income_tax=market_data.get("has_state_income_tax"),
+                insurance_risk=market_data.get("insurance_risk"),
+                insurance_risk_factors=market_data.get("insurance_risk_factors", []),
+                data_sources=market_data.get("data_sources", []),
+            )
+            # Compute scores on-demand
+            metrics = MarketMetrics.from_market(market)
+            overall_score = metrics.overall_score
+            cash_flow_score = metrics.cash_flow_score
+            growth_score = metrics.growth_score
+        except Exception as e:
+            # Fall back to stored scores if computation fails
+            print(f"Score computation failed for {m.name}: {e}")
+            overall_score = m.overall_score or 0
+            cash_flow_score = m.cash_flow_score or 0
+            growth_score = m.growth_score or 0
 
     return MarketResponse(
         id=m.id,
@@ -233,16 +293,16 @@ def build_market_response(m) -> MarketResponse:
         is_favorite=m.is_favorite,
         is_supported=m.is_supported,
         api_support=m.api_support,
-        overall_score=m.overall_score or 0,
-        cash_flow_score=m.cash_flow_score or 0,
-        growth_score=m.growth_score or 0,
+        overall_score=overall_score,
+        cash_flow_score=cash_flow_score,
+        growth_score=growth_score,
         # Market data fields
         median_home_price=market_data.get("median_home_price"),
         median_rent=market_data.get("median_rent"),
         rent_to_price_ratio=market_data.get("avg_rent_to_price"),
         price_change_1yr=market_data.get("price_change_1yr"),
-        job_growth_1yr=market_data.get("job_growth_1yr"),
-        unemployment_rate=market_data.get("unemployment_rate"),
+        job_growth_1yr=market_data.get("job_growth_yoy") or market_data.get("job_growth_1yr"),
+        unemployment_rate=market_data.get("metro_unemployment_rate") or market_data.get("unemployment_rate"),
         days_on_market=market_data.get("days_on_market_avg"),
         months_of_inventory=market_data.get("months_of_inventory"),
     )
@@ -250,60 +310,36 @@ def build_market_response(m) -> MarketResponse:
 
 # ==================== Market Routes ====================
 
-# Global cache for metro search to avoid re-fetching on every keystroke
-_metro_cache: dict = {"data": None, "timestamp": None}
-_METRO_CACHE_TTL = 3600  # 1 hour
-
 
 @router.get("/markets/search", response_model=List[MetroSuggestion])
 async def search_metros(
     q: str = Query(..., min_length=2, description="Search query"),
     limit: int = Query(10, ge=1, le=50),
 ):
-    """Search for metros from Redfin data for autocomplete."""
-    from src.data_sources.redfin import RedfinDataCenter
+    """Search for metros using local data for instant autocomplete."""
+    from src.data_sources.metros import search_metros as local_search
+    from src.data_sources.hud_fmr import EMBEDDED_FMR_DATA
 
-    # Check if we have cached metro data
-    now = datetime.utcnow()
-    if (_metro_cache["data"] is not None and
-        _metro_cache["timestamp"] is not None and
-        (now - _metro_cache["timestamp"]).total_seconds() < _METRO_CACHE_TTL):
-        all_metros = _metro_cache["data"]
-    else:
-        # Fetch fresh data
-        redfin = RedfinDataCenter()
-        try:
-            all_metros = await redfin.get_all_metros()
-            _metro_cache["data"] = all_metros
-            _metro_cache["timestamp"] = now
-        finally:
-            await redfin.close()
+    # Use local metro data - instant, no API call
+    matches = local_search(q, limit=limit)
 
-    # Filter by search query (case-insensitive partial match)
-    query_lower = q.lower()
-    matches = [
-        m for m in all_metros
-        if query_lower in m.region_name.lower() or query_lower in m.state.lower()
-    ]
-
-    # Sort by relevance (starts with query first, then alphabetically)
-    matches.sort(key=lambda m: (
-        not m.region_name.lower().startswith(query_lower),
-        m.region_name.lower()
-    ))
-
-    # Parse into response format
+    # Build response with support indicators
     results = []
-    for m in matches[:limit]:
-        # Extract city name from metro (e.g., "Tampa-St. Petersburg-Clearwater" -> "Tampa")
-        city_name = m.region_name.split("-")[0].split(",")[0].strip()
+    for m in matches:
+        # Check if this metro has HUD FMR data (full support)
+        has_support = m.id in EMBEDDED_FMR_DATA or m.has_hud_data
+
+        # Get rent estimate if available
+        fmr_data = EMBEDDED_FMR_DATA.get(m.id)
+        median_rent = fmr_data.fmr_2br if fmr_data else None
 
         results.append(MetroSuggestion(
-            name=city_name,
+            name=m.city,
             state=m.state,
-            metro=m.region_name,
-            median_price=m.median_sale_price,
-            median_rent=None,  # Would need HUD data
+            metro=m.metro_name,
+            median_price=None,  # Would need live data
+            median_rent=median_rent,
+            has_full_support=has_support,
         ))
 
     return results
@@ -311,17 +347,14 @@ async def search_metros(
 @router.get("/markets", response_model=List[MarketResponse])
 async def get_markets(
     favorites_only: bool = Query(False, description="Only return favorite markets"),
-    supported_only: bool = Query(True, description="Only return API-supported markets"),
 ):
-    """Get all markets with optional filters."""
+    """Get all markets sorted by favorites first, then by score."""
     repo = get_repository()
 
     if favorites_only:
         markets = repo.get_favorite_markets()
-    elif supported_only:
-        markets = repo.get_supported_markets()
     else:
-        markets = repo.get_supported_markets()
+        markets = repo.get_all_markets_sorted()
 
     return [build_market_response(m) for m in markets]
 
@@ -336,7 +369,17 @@ async def get_favorite_markets():
 
 @router.post("/markets", response_model=MarketResponse)
 async def add_market(request: AddMarketRequest):
-    """Add a new market and auto-populate its data."""
+    """
+    Add a new market and fully enrich it with data from all sources.
+
+    This endpoint:
+    1. Creates the market record
+    2. Fetches data from all sources in parallel (Redfin, BLS, Census, HUD, FRED)
+    3. Calculates investment scores
+    4. Persists all enriched data to the database
+
+    The enrichment may take 10-30 seconds as it fetches from multiple APIs.
+    """
     import asyncio
     from src.data_sources.aggregator import DataAggregator
     from src.models.market import MarketMetrics
@@ -350,37 +393,62 @@ async def add_market(request: AddMarketRequest):
         is_favorite=request.is_favorite,
     )
 
-    # Auto-populate market data from external sources with timeout
+    # Fully enrich market data from all external sources
     aggregator = DataAggregator()
+    enrichment_errors = []
+
     try:
-        # Use asyncio.wait_for to timeout after 30 seconds
+        # Use asyncio.wait_for to timeout after 60 seconds (increased for more API calls)
         try:
-            market_data = await asyncio.wait_for(
-                aggregator.get_market_data(request.name, request.state),
-                timeout=30.0
+            enriched_data = await asyncio.wait_for(
+                aggregator.get_market_data(
+                    city=request.name,
+                    state=request.state,
+                    metro=request.metro,
+                ),
+                timeout=60.0
             )
         except asyncio.TimeoutError:
             print(f"Timeout fetching market data for {request.name}, {request.state}")
-            market_data = None
+            enriched_data = None
+            enrichment_errors.append("Timeout fetching market data")
 
-        if market_data:
-            market_model = market_data.to_market()
+        if enriched_data:
+            # Convert to Market model for scoring
+            market_model = enriched_data.to_market()
             metrics = MarketMetrics.from_market(market_model)
 
-            # Update database with fetched data
+            # Update database with ALL enriched data
             market_db = repo.session.query(MarketDB).filter_by(id=market.id).first()
             if market_db:
-                market_db.market_data = market_model.model_dump(mode='json')
+                # Store the full enriched data (includes all sources)
+                market_db.market_data = enriched_data.to_dict()
+
+                # Store metro name if we got a better one from Redfin/Census
+                if enriched_data.metro:
+                    market_db.metro = enriched_data.metro
+
+                # Store calculated scores
                 market_db.overall_score = metrics.overall_score
                 market_db.cash_flow_score = metrics.cash_flow_score
                 market_db.growth_score = metrics.growth_score
+
                 market_db.updated_at = datetime.utcnow()
                 repo.session.commit()
 
+                # Log enrichment results
+                sources = enriched_data.data_sources
+                errors = enriched_data.enrichment_errors
+                print(f"Market {request.name}, {request.state} enriched from: {sources}")
+                if errors:
+                    print(f"  Enrichment errors: {errors}")
+
                 # Update return values
                 market = market_db
+
     except Exception as e:
-        print(f"Error fetching market data: {e}")
+        print(f"Error enriching market data: {e}")
+        enrichment_errors.append(str(e))
     finally:
         await aggregator.close()
 
@@ -401,9 +469,15 @@ async def toggle_market_favorite(market_id: str):
 
 @router.post("/markets/{market_id}/refresh", response_model=MarketResponse)
 async def refresh_market_data(market_id: str):
-    """Fetch fresh market data and update scores."""
+    """
+    Refresh market data from all sources.
+
+    Re-fetches data from Redfin, BLS, Census, HUD, FRED and recalculates scores.
+    Use this to get updated market conditions and scores.
+    """
+    import asyncio
     from src.data_sources.aggregator import DataAggregator
-    from src.models.market import Market, MarketMetrics
+    from src.models.market import MarketMetrics
 
     repo = get_repository()
 
@@ -416,23 +490,42 @@ async def refresh_market_data(market_id: str):
 
     aggregator = DataAggregator()
     try:
-        # Fetch market data from external sources
-        market_data = await aggregator.get_market_data(market_db.name, market_db.state)
+        # Fetch fresh data from all sources
+        try:
+            enriched_data = await asyncio.wait_for(
+                aggregator.get_market_data(
+                    city=market_db.name,
+                    state=market_db.state,
+                    metro=market_db.metro,
+                ),
+                timeout=60.0
+            )
+        except asyncio.TimeoutError:
+            raise HTTPException(
+                status_code=504,
+                detail="Timeout fetching market data. Please try again."
+            )
 
-        if market_data:
+        if enriched_data:
             # Convert to Market model for scoring
-            market = market_data.to_market()
+            market_model = enriched_data.to_market()
+            metrics = MarketMetrics.from_market(market_model)
 
-            # Calculate scores
-            metrics = MarketMetrics.from_market(market)
-
-            # Update database
-            market_db.market_data = market.model_dump(mode='json')
+            # Update database with fresh data
+            market_db.market_data = enriched_data.to_dict()
+            if enriched_data.metro:
+                market_db.metro = enriched_data.metro
             market_db.overall_score = metrics.overall_score
             market_db.cash_flow_score = metrics.cash_flow_score
             market_db.growth_score = metrics.growth_score
             market_db.updated_at = datetime.utcnow()
             repo.session.commit()
+
+            # Log refresh results
+            print(f"Market {market_db.name} refreshed from: {enriched_data.data_sources}")
+            if enriched_data.enrichment_errors:
+                print(f"  Errors: {enriched_data.enrichment_errors}")
+
     finally:
         await aggregator.close()
 
@@ -441,9 +534,14 @@ async def refresh_market_data(market_id: str):
 
 @router.post("/markets/refresh-all")
 async def refresh_all_markets():
-    """Refresh data for all favorite markets."""
+    """
+    Refresh data for all favorite markets.
+
+    Fetches fresh data from all sources for each favorited market.
+    This may take several minutes for many markets.
+    """
     from src.data_sources.aggregator import DataAggregator
-    from src.models.market import Market, MarketMetrics
+    from src.models.market import MarketMetrics
     from src.db.models import MarketDB
 
     repo = get_repository()
@@ -452,21 +550,34 @@ async def refresh_all_markets():
     aggregator = DataAggregator()
     updated = 0
     errors = []
+    results = []
 
     try:
         for market_db in markets:
             try:
-                market_data = await aggregator.get_market_data(market_db.name, market_db.state)
-                if market_data:
-                    market = market_data.to_market()
-                    metrics = MarketMetrics.from_market(market)
+                enriched_data = await aggregator.get_market_data(
+                    city=market_db.name,
+                    state=market_db.state,
+                    metro=market_db.metro,
+                )
+                if enriched_data:
+                    market_model = enriched_data.to_market()
+                    metrics = MarketMetrics.from_market(market_model)
 
-                    market_db.market_data = market.model_dump(mode='json')
+                    market_db.market_data = enriched_data.to_dict()
+                    if enriched_data.metro:
+                        market_db.metro = enriched_data.metro
                     market_db.overall_score = metrics.overall_score
                     market_db.cash_flow_score = metrics.cash_flow_score
                     market_db.growth_score = metrics.growth_score
                     market_db.updated_at = datetime.utcnow()
                     updated += 1
+
+                    results.append({
+                        "market": f"{market_db.name}, {market_db.state}",
+                        "sources": enriched_data.data_sources,
+                        "errors": enriched_data.enrichment_errors or None,
+                    })
             except Exception as e:
                 errors.append(f"{market_db.name}: {str(e)}")
 
@@ -478,7 +589,8 @@ async def refresh_all_markets():
         "success": True,
         "updated": updated,
         "total": len(markets),
-        "errors": errors if errors else None
+        "results": results,
+        "errors": errors if errors else None,
     }
 
 
@@ -715,11 +827,13 @@ async def refresh_property_location_data(property_id: str):
     Refresh location data (Walk Score, Noise, Schools, Flood Zone) for a saved property.
 
     This fetches fresh data from external APIs and updates the cached location_data.
+    If the property doesn't have coordinates, it will try to geocode the address first.
     """
     import asyncio
     from src.data_sources.walkscore import WalkScoreClient
     from src.data_sources.us_real_estate import USRealEstateClient
     from src.data_sources.fema_flood import FEMAFloodClient
+    from src.data_sources.geocoder import get_geocoder
 
     repo = get_repository()
     prop = repo.get_saved_property(property_id)
@@ -727,15 +841,39 @@ async def refresh_property_location_data(property_id: str):
     if not prop:
         raise HTTPException(status_code=404, detail="Property not found")
 
-    # Need coordinates to fetch location data
+    # Get coordinates - geocode if missing
     latitude = getattr(prop, 'latitude', None)
     longitude = getattr(prop, 'longitude', None)
 
     if not latitude or not longitude:
-        raise HTTPException(
-            status_code=400,
-            detail="Property doesn't have coordinates. Cannot fetch location data."
-        )
+        # Try to geocode the address
+        try:
+            geocoder = get_geocoder()
+            geo_result = await geocoder.geocode(
+                address=prop.address,
+                city=prop.city,
+                state=prop.state,
+                zip_code=prop.zip_code,
+            )
+            if geo_result:
+                latitude = geo_result.latitude
+                longitude = geo_result.longitude
+                # Persist the coordinates
+                prop.latitude = latitude
+                prop.longitude = longitude
+                repo.session.commit()
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Could not geocode address. Please verify the address is correct."
+                )
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to geocode address: {str(e)}"
+            )
 
     # Fetch all location data in parallel
     walkscore_client = WalkScoreClient()
@@ -903,8 +1041,8 @@ async def reanalyze_property(property_id: str):
         prop.risk_score = deal.score.risk_score if deal.score else None
         prop.liquidity_score = deal.score.liquidity_score if deal.score else None
         prop.cash_flow = deal.financials.monthly_cash_flow if deal.financials else None
-        prop.cash_on_cash = deal.financials.cash_on_cash_return if deal.financials else None
-        prop.cap_rate = deal.financials.cap_rate if deal.financials else None
+        prop.cash_on_cash = deal.financial_metrics.cash_on_cash_return if deal.financial_metrics else None
+        prop.cap_rate = deal.financial_metrics.cap_rate if deal.financial_metrics else None
         prop.analysis_data = deal.model_dump(mode='json')
         prop.last_analyzed = datetime.utcnow()
         prop.updated_at = datetime.utcnow()
@@ -954,6 +1092,18 @@ async def add_custom_scenario(property_id: str, request: CustomScenarioRequest):
     )
     financials.calculate()
 
+    # Calculate derived metrics
+    cash_on_cash = (
+        financials.annual_cash_flow / financials.total_cash_needed
+        if financials.total_cash_needed and financials.total_cash_needed > 0
+        else 0
+    )
+    cap_rate = (
+        financials.net_operating_income / request.offer_price
+        if request.offer_price > 0
+        else 0
+    )
+
     # Build scenario object
     scenario = {
         "name": request.name or f"Scenario at {request.offer_price:,.0f}",
@@ -962,9 +1112,9 @@ async def add_custom_scenario(property_id: str, request: CustomScenarioRequest):
         "interest_rate": request.interest_rate,
         "loan_term_years": request.loan_term_years,
         "monthly_cash_flow": financials.monthly_cash_flow,
-        "cash_on_cash": financials.cash_on_cash_return,
-        "cap_rate": financials.cap_rate,
-        "total_cash_needed": financials.total_cash_invested,
+        "cash_on_cash": cash_on_cash,
+        "cap_rate": cap_rate,
+        "total_cash_needed": financials.total_cash_needed,
         "created_at": datetime.utcnow().isoformat(),
     }
 

@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routes import markets, deals, analysis, import_property, properties, saved
+from api.routes import markets, deals, analysis, import_property, properties, saved, jobs
 from api.models import HealthResponse
 from src.db import init_database, get_repository
 
@@ -52,6 +52,7 @@ app.include_router(analysis.router, prefix="/api/analysis", tags=["Analysis"])
 app.include_router(import_property.router, prefix="/api/import", tags=["Import"])
 app.include_router(properties.router, prefix="/api/properties", tags=["Properties"])
 app.include_router(saved.router, prefix="/api/saved", tags=["Saved"])
+app.include_router(jobs.router, tags=["Jobs"])  # Already has /api/jobs prefix
 
 
 @app.get("/", response_model=HealthResponse)

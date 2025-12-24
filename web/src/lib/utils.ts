@@ -20,7 +20,7 @@ export function formatCurrency(value: number): string {
 }
 
 /**
- * Format a number as a percentage
+ * Format a decimal as a percentage (0.05 -> "5.0%")
  */
 export function formatPercent(value: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -28,6 +28,18 @@ export function formatPercent(value: number): string {
     minimumFractionDigits: 1,
     maximumFractionDigits: 1,
   }).format(value);
+}
+
+/**
+ * Format a value that is already in percentage form (5.123 -> "5.1%", -2.5 -> "-2.5%")
+ * Optionally shows a + sign for positive values
+ */
+export function formatPercentValue(value: number, showPlus: boolean = false): string {
+  const formatted = value.toFixed(1);
+  if (showPlus && value > 0) {
+    return `+${formatted}%`;
+  }
+  return `${formatted}%`;
 }
 
 /**

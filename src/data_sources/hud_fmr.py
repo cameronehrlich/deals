@@ -17,7 +17,10 @@ from typing import Optional
 import httpx
 
 # HUD FMR data URL (updates annually)
-HUD_FMR_URL = "https://www.huduser.gov/portal/datasets/fmr/fmr2024/FY24_FMRs.csv"
+# FY25 URL - check https://www.huduser.gov/portal/datasets/fmr.html for updates
+HUD_FMR_URL = "https://www.huduser.gov/portal/datasets/fmr/fmr2025/FY25_FMRs.csv"
+# Fallback to FY24 if FY25 not available
+HUD_FMR_URL_FALLBACK = "https://www.huduser.gov/portal/datasets/fmr/fmr2024/FY24_FMRs.csv"
 
 
 @dataclass
@@ -181,6 +184,48 @@ EMBEDDED_FMR_DATA = {
         fmr_4br=2615,
         year=2024,
     ),
+    # Nashville-Davidson-Murfreesboro-Franklin, TN
+    "nashville_tn": FairMarketRent(
+        fips_code="47037",
+        cbsa_code="34980",
+        metro_name="Nashville-Davidson-Murfreesboro-Franklin",
+        county_name="Davidson",
+        state="TN",
+        fmr_0br=1108,
+        fmr_1br=1232,
+        fmr_2br=1401,
+        fmr_3br=1807,
+        fmr_4br=2100,
+        year=2024,
+    ),
+    # Houston-The Woodlands-Sugar Land, TX
+    "houston_tx": FairMarketRent(
+        fips_code="48201",
+        cbsa_code="26420",
+        metro_name="Houston-The Woodlands-Sugar Land",
+        county_name="Harris",
+        state="TX",
+        fmr_0br=979,
+        fmr_1br=1098,
+        fmr_2br=1308,
+        fmr_3br=1742,
+        fmr_4br=2143,
+        year=2024,
+    ),
+    # Miami-Fort Lauderdale-Pompano Beach, FL
+    "miami_fl": FairMarketRent(
+        fips_code="12086",
+        cbsa_code="33100",
+        metro_name="Miami-Fort Lauderdale-Pompano Beach",
+        county_name="Miami-Dade",
+        state="FL",
+        fmr_0br=1505,
+        fmr_1br=1798,
+        fmr_2br=2263,
+        fmr_3br=2925,
+        fmr_4br=3325,
+        year=2024,
+    ),
 }
 
 
@@ -235,31 +280,42 @@ class HudFmrLoader:
         if self._loaded:
             return True
 
-        try:
-            response = await self._client.get(HUD_FMR_URL)
-            response.raise_for_status()
+        # Try primary URL first, then fallback
+        urls_to_try = [HUD_FMR_URL, HUD_FMR_URL_FALLBACK]
 
-            content = response.text
-            reader = csv.DictReader(io.StringIO(content))
+        for url in urls_to_try:
+            try:
+                response = await self._client.get(url)
+                response.raise_for_status()
 
-            for row in reader:
-                try:
-                    # Parse the row
-                    fmr = self._parse_hud_row(row)
-                    if fmr:
-                        # Create market key
-                        market_key = self._make_market_key(fmr)
-                        if market_key:
-                            self._fmr_data[market_key] = fmr
-                except Exception:
-                    continue
+                content = response.text
+                reader = csv.DictReader(io.StringIO(content))
 
-            self._loaded = True
-            return True
+                for row in reader:
+                    try:
+                        # Parse the row
+                        fmr = self._parse_hud_row(row)
+                        if fmr:
+                            # Create market key
+                            market_key = self._make_market_key(fmr)
+                            if market_key:
+                                self._fmr_data[market_key] = fmr
+                    except Exception:
+                        continue
 
-        except Exception as e:
-            print(f"Error loading HUD FMR data: {e}")
-            return False
+                self._loaded = True
+                print(f"Loaded HUD FMR data from {url}")
+                return True
+
+            except Exception as e:
+                print(f"Failed to load HUD FMR from {url}: {e}")
+                continue
+
+        # If all URLs failed, we still have embedded data
+        # Mark as loaded to prevent infinite recursion on retry
+        self._loaded = True
+        print("Could not load HUD FMR data from any URL, using embedded data only")
+        return False
 
     def _parse_hud_row(self, row: dict) -> Optional[FairMarketRent]:
         """Parse a row from HUD CSV."""

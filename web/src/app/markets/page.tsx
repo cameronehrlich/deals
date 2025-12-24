@@ -15,8 +15,14 @@ import {
   Loader2,
   X,
   Trash2,
+  RefreshCw,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  PlayCircle,
+  ChevronDown,
 } from "lucide-react";
-import { api, SavedMarket, MetroSuggestion } from "@/lib/api";
+import { api, SavedMarket, MetroSuggestion, Job, JobStats } from "@/lib/api";
 import { LoadingPage, LoadingSpinner } from "@/components/LoadingSpinner";
 import { ScoreGauge } from "@/components/ScoreGauge";
 import { cn, formatCurrency, getScoreBadge } from "@/lib/utils";
@@ -288,15 +294,18 @@ function AddMarketModal({
                   >
                     <MapPin className="h-4 w-4 text-gray-400 mt-0.5 flex-shrink-0" />
                     <div className="flex-1 min-w-0">
-                      <div className="font-medium text-gray-900">
+                      <div className="font-medium text-gray-900 flex items-center gap-2">
                         {metro.name}, {metro.state}
+                        {metro.has_full_support && (
+                          <span className="badge badge-success text-xs">Supported</span>
+                        )}
                       </div>
                       <div className="text-sm text-gray-500 truncate">
                         {metro.metro}
                       </div>
-                      {metro.median_price && (
+                      {metro.median_rent && (
                         <div className="text-xs text-gray-400 mt-1">
-                          Median price: {formatCurrency(metro.median_price)}
+                          FMR 2BR: {formatCurrency(metro.median_rent)}/mo
                         </div>
                       )}
                     </div>
@@ -318,15 +327,18 @@ function AddMarketModal({
             <div className="p-4 bg-primary-50 rounded-lg border border-primary-200">
               <div className="flex items-start justify-between">
                 <div>
-                  <div className="font-semibold text-primary-900">
+                  <div className="font-semibold text-primary-900 flex items-center gap-2">
                     {selectedMetro.name}, {selectedMetro.state}
+                    {selectedMetro.has_full_support && (
+                      <span className="badge badge-success text-xs">Supported</span>
+                    )}
                   </div>
                   <div className="text-sm text-primary-700 mt-1">
                     {selectedMetro.metro}
                   </div>
-                  {selectedMetro.median_price && (
+                  {selectedMetro.median_rent && (
                     <div className="text-sm text-primary-600 mt-2">
-                      Median price: {formatCurrency(selectedMetro.median_price)}
+                      FMR 2BR: {formatCurrency(selectedMetro.median_rent)}/mo
                     </div>
                   )}
                 </div>
@@ -390,31 +402,99 @@ export default function MarketsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [showAddModal, setShowAddModal] = useState(false);
 
-  // Fetch markets
-  const fetchMarkets = useCallback(async () => {
+  // Job state
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [jobStats, setJobStats] = useState<JobStats | null>(null);
+  const [enqueuingJobs, setEnqueuingJobs] = useState(false);
+  const [showRefreshMenu, setShowRefreshMenu] = useState(false);
+  const [currentBatchIds, setCurrentBatchIds] = useState<Set<string>>(new Set());
+
+  // Fetch job status
+  const fetchJobStatus = useCallback(async () => {
     try {
-      setLoading(true);
+      const [jobList, stats] = await Promise.all([
+        api.getJobs({ job_type: "enrich_market", limit: 20 }),
+        api.getJobStats(),
+      ]);
+      setJobs(jobList);
+      setJobStats(stats);
+    } catch (err) {
+      console.error("Failed to fetch job status:", err);
+    }
+  }, []);
+
+  // Fetch markets
+  const fetchMarkets = useCallback(async (showLoading = true) => {
+    try {
+      if (showLoading) {
+        setLoading(true);
+      }
       setError(null);
 
-      // Fetch both favorite and all supported markets
-      const [favorites, all] = await Promise.all([
-        api.getFavoriteMarkets(),
-        api.getSavedMarkets({ supported_only: true }),
-      ]);
+      // Fetch all markets (already sorted by favorites first, then score)
+      const all = await api.getSavedMarkets();
+
+      // Separate favorites from the rest
+      const favorites = all.filter(m => m.is_favorite);
+      const others = all.filter(m => !m.is_favorite);
 
       setFavoriteMarkets(favorites);
-      setAllMarkets(all);
+      setAllMarkets(others);
     } catch (err) {
       console.error("Failed to fetch markets:", err);
       setError(err instanceof Error ? err.message : "Failed to load markets");
     } finally {
-      setLoading(false);
+      if (showLoading) {
+        setLoading(false);
+      }
     }
   }, []);
 
+  // Poll for job updates when jobs are running
+  useEffect(() => {
+    if (jobStats && (jobStats.pending > 0 || jobStats.running > 0)) {
+      const interval = setInterval(() => {
+        fetchJobStatus();
+        fetchMarkets(false); // Refresh markets silently (no loading spinner)
+      }, 3000);
+      return () => clearInterval(interval);
+    }
+  }, [jobStats, fetchJobStatus, fetchMarkets]);
+
+  // Enqueue jobs for markets
+  const handleEnqueueJobs = async (favoritesOnly: boolean) => {
+    try {
+      setEnqueuingJobs(true);
+      const result = await api.enqueueMarketJobs({ favorites_only: favoritesOnly });
+      console.log(`Enqueued ${result.jobs_created} jobs`);
+      // Track this batch's job IDs for accurate progress (only if jobs were created)
+      if (result.job_ids.length > 0) {
+        setCurrentBatchIds(new Set(result.job_ids));
+      }
+      // If no jobs created but there are pending jobs, track all active jobs
+      fetchJobStatus();
+    } catch (err) {
+      console.error("Failed to enqueue jobs:", err);
+    } finally {
+      setEnqueuingJobs(false);
+    }
+  };
+
+  // Cancel all pending market jobs
+  const handleCancelJobs = async () => {
+    try {
+      await api.cancelJobsByType("enrich_market");
+      setCurrentBatchIds(new Set()); // Clear batch tracking
+      fetchJobStatus();
+    } catch (err) {
+      console.error("Failed to cancel jobs:", err);
+    }
+  };
+
   useEffect(() => {
     fetchMarkets();
-  }, [fetchMarkets]);
+    fetchJobStatus();
+  }, [fetchMarkets, fetchJobStatus]);
 
   // Toggle favorite status
   const handleToggleFavorite = async (marketId: string) => {
@@ -463,7 +543,7 @@ export default function MarketsPage() {
     }
   };
 
-  // Filter markets by search
+  // Filter non-favorite markets by search
   const filteredMarkets = allMarkets.filter(market => {
     if (!searchQuery) return true;
     const query = searchQuery.toLowerCase();
@@ -473,10 +553,6 @@ export default function MarketsPage() {
       market.metro?.toLowerCase().includes(query)
     );
   });
-
-  // Exclude favorites from explore list
-  const favoriteIds = new Set(favoriteMarkets.map(m => m.id));
-  const exploreMarkets = filteredMarkets.filter(m => !favoriteIds.has(m.id));
 
   if (loading) {
     return <LoadingPage />;
@@ -492,14 +568,128 @@ export default function MarketsPage() {
             Your researched markets and explore new opportunities
           </p>
         </div>
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="btn-primary flex items-center gap-2"
-        >
-          <Plus className="h-4 w-4" />
-          Add Market
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Refresh dropdown */}
+          <div className="relative">
+            <button
+              onClick={() => setShowRefreshMenu(!showRefreshMenu)}
+              disabled={enqueuingJobs || !!(jobStats && (jobStats.pending > 0 || jobStats.running > 0))}
+              className="btn-outline flex items-center gap-2"
+            >
+              <RefreshCw className={cn("h-4 w-4", enqueuingJobs && "animate-spin")} />
+              Refresh
+              <ChevronDown className="h-4 w-4" />
+            </button>
+            {showRefreshMenu && (
+              <div className="absolute right-0 mt-1 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-20">
+                <button
+                  onClick={() => {
+                    handleEnqueueJobs(true);
+                    setShowRefreshMenu(false);
+                  }}
+                  className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+                >
+                  <Star className="h-4 w-4 text-yellow-500" />
+                  Favorites Only ({favoriteMarkets.length})
+                </button>
+                <button
+                  onClick={() => {
+                    handleEnqueueJobs(false);
+                    setShowRefreshMenu(false);
+                  }}
+                  className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+                >
+                  <MapPin className="h-4 w-4 text-primary-600" />
+                  All Markets ({favoriteMarkets.length + allMarkets.length})
+                </button>
+              </div>
+            )}
+          </div>
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="btn-primary flex items-center gap-2"
+          >
+            <Plus className="h-4 w-4" />
+            Add Market
+          </button>
+        </div>
       </div>
+
+      {/* Job Status Panel */}
+      {jobStats && (jobStats.pending > 0 || jobStats.running > 0) && (() => {
+        // Calculate progress - use batch IDs if available, otherwise use global stats
+        let completedJobs: number;
+        let totalJobs: number;
+        let runningJob: typeof jobs[0] | undefined;
+
+        if (currentBatchIds.size > 0) {
+          // Track specific batch
+          const batchJobs = jobs.filter(j => currentBatchIds.has(j.id));
+          completedJobs = batchJobs.filter(j => j.status === "completed").length;
+          const pendingJobs = batchJobs.filter(j => j.status === "pending").length;
+          const runningJobs = batchJobs.filter(j => j.status === "running").length;
+          totalJobs = completedJobs + pendingJobs + runningJobs;
+          runningJob = batchJobs.find(j => j.status === "running");
+        } else {
+          // No batch tracking - use global stats (for resumed sessions or edge cases)
+          completedJobs = 0; // We don't know how many completed in this session
+          totalJobs = jobStats.pending + jobStats.running;
+          runningJob = jobs.find(j => j.status === "running");
+        }
+
+        const overallProgress = totalJobs > 0 ? Math.round((completedJobs / totalJobs) * 100) : 0;
+
+        return (
+          <div className="card bg-blue-50 border-blue-200">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Loader2 className="h-5 w-5 text-blue-600 animate-spin" />
+                <div>
+                  <p className="font-medium text-blue-900">
+                    Refreshing market data...
+                  </p>
+                  <p className="text-sm text-blue-700">
+                    {currentBatchIds.size > 0
+                      ? `${completedJobs} of ${totalJobs} markets completed`
+                      : `${jobStats.pending} pending, ${jobStats.running} running`
+                    }
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={handleCancelJobs}
+                className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+              >
+                Cancel
+              </button>
+            </div>
+            {/* Overall progress */}
+            <div className="mt-3 pt-3 border-t border-blue-200">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-blue-800">
+                  {runningJob?.message || "Processing..."}
+                </span>
+                <span className="text-blue-600">
+                  {currentBatchIds.size > 0
+                    ? `${overallProgress}%`
+                    : `${jobStats.completed} done`
+                  }
+                </span>
+              </div>
+              <div className="mt-1 h-1.5 bg-blue-200 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-blue-600 transition-all duration-300"
+                  style={{
+                    width: currentBatchIds.size > 0
+                      ? `${overallProgress}%`
+                      : `${Math.round((jobStats.completed / (jobStats.total - (jobStats as any).failed || 0)) * 100)}%`
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {error && (
         <div className="card border-red-200 bg-red-50">
@@ -544,13 +734,13 @@ export default function MarketsPage() {
         )}
       </section>
 
-      {/* Explore Markets */}
+      {/* All Markets */}
       <section>
         <div className="flex flex-col sm:flex-row sm:items-center gap-4 mb-4">
           <div className="flex items-center gap-2">
             <MapPin className="h-5 w-5 text-primary-600" />
-            <h2 className="text-xl font-semibold text-gray-900">Explore Markets</h2>
-            <span className="text-sm text-gray-500">({exploreMarkets.length})</span>
+            <h2 className="text-xl font-semibold text-gray-900">All Markets</h2>
+            <span className="text-sm text-gray-500">({filteredMarkets.length})</span>
           </div>
 
           {/* Search */}
@@ -576,32 +766,23 @@ export default function MarketsPage() {
           </div>
         </div>
 
-        {exploreMarkets.length === 0 ? (
+        {filteredMarkets.length === 0 ? (
           <div className="card text-center py-8 bg-gray-50">
             <Building className="h-8 w-8 text-gray-300 mx-auto mb-3" />
             <p className="text-gray-500">
               {searchQuery
                 ? `No markets matching "${searchQuery}"`
-                : "All supported markets are in your favorites!"
+                : "All markets are in your favorites!"
               }
             </p>
-            {searchQuery && (
-              <button
-                onClick={() => setShowAddModal(true)}
-                className="btn-primary mt-4"
-              >
-                <Plus className="h-4 w-4 inline mr-2" />
-                Add "{searchQuery}" as new market
-              </button>
-            )}
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {exploreMarkets.map((market, index) => (
+            {filteredMarkets.map((market, index) => (
               <div
                 key={market.id}
                 className="animate-slide-up"
-                style={{ animationDelay: `${index * 30}ms` }}
+                style={{ animationDelay: `${Math.min(index, 10) * 30}ms` }}
               >
                 <ExploreMarketCard
                   market={market}

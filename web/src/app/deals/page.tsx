@@ -1,7 +1,7 @@
 "use client";
 
-import { Suspense, useEffect, useState, useCallback } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { Suspense, useEffect, useState, useCallback, useRef, useLayoutEffect } from "react";
+import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import {
   Search,
   Building,
@@ -16,18 +16,66 @@ import { api, PropertyListing, ApiUsage } from "@/lib/api";
 import { LoadingPage, LoadingSpinner } from "@/components/LoadingSpinner";
 import { cn, formatCurrency } from "@/lib/utils";
 
-// Markets for live search (location format: "City, ST")
-const LIVE_MARKETS = [
+// Session storage keys for persisting state
+const STORAGE_KEY = "deals_page_state";
+
+interface PersistedState {
+  properties: PropertyListing[];
+  displayCount: number;
+  scrollY: number;
+  apiUsage: ApiUsage | null;
+  selectedLocation: string;
+  maxPrice: string;
+  minBeds: string;
+  sortBy: string;
+  timestamp: number;
+}
+
+// Save state to sessionStorage
+function saveState(state: Omit<PersistedState, "timestamp">) {
+  try {
+    const data: PersistedState = { ...state, timestamp: Date.now() };
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  } catch (e) {
+    console.warn("Failed to save deals page state:", e);
+  }
+}
+
+// Load state from sessionStorage (max 10 min old)
+function loadState(): PersistedState | null {
+  try {
+    const stored = sessionStorage.getItem(STORAGE_KEY);
+    if (!stored) return null;
+    const data: PersistedState = JSON.parse(stored);
+    // Expire after 10 minutes
+    if (Date.now() - data.timestamp > 10 * 60 * 1000) {
+      sessionStorage.removeItem(STORAGE_KEY);
+      return null;
+    }
+    return data;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Convert market ID (salt_lake_city_ut) to location format (Salt Lake City, UT)
+function marketIdToLocation(marketId: string): string {
+  const parts = marketId.split("_");
+  const state = parts.pop()?.toUpperCase() || "";
+  const city = parts.map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
+  return `${city}, ${state}`;
+}
+
+// Fallback markets if API fails
+const DEFAULT_MARKETS = [
   "Phoenix, AZ",
   "Tampa, FL",
   "Austin, TX",
-  "Miami, FL",
   "Indianapolis, IN",
   "Cleveland, OH",
   "Memphis, TN",
   "Birmingham, AL",
   "Kansas City, MO",
-  "Houston, TX",
 ];
 
 // Sort options for investment analysis
@@ -182,12 +230,22 @@ function LivePropertyCard({
 function DealsContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const pathname = usePathname();
+  const initialSearchDone = useRef(false);
+  const restoredFromStorage = useRef(false);
+  const scrollRestored = useRef(false);
+
+  // Read initial values from URL params
+  const urlMarket = searchParams.get("market") || searchParams.get("markets") || "";
+  const urlMaxPrice = searchParams.get("maxPrice") || "200000";
+  const urlMinBeds = searchParams.get("minBeds") || "2";
+  const urlSortBy = searchParams.get("sortBy") || "price_asc";
 
   // Live properties state
   const [allProperties, setAllProperties] = useState<PropertyListing[]>([]); // Full results from API
   const [displayCount, setDisplayCount] = useState(INITIAL_LOAD); // How many to show
   const [apiUsage, setApiUsage] = useState<ApiUsage | null>(null);
-  const [sortBy, setSortBy] = useState<string>("price_asc");
+  const [sortBy, setSortBy] = useState<string>(urlSortBy);
 
   // Common state
   const [loading, setLoading] = useState(true);
@@ -195,10 +253,85 @@ function DealsContent() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Filters
-  const [maxPrice, setMaxPrice] = useState<string>("400000");
-  const [minBeds, setMinBeds] = useState("2");
-  const [selectedLocation, setSelectedLocation] = useState(LIVE_MARKETS[0]);
+  // Markets dropdown
+  const [availableMarkets, setAvailableMarkets] = useState<string[]>(DEFAULT_MARKETS);
+  const [loadingMarkets, setLoadingMarkets] = useState(true);
+
+  // Filters - initialize from URL params
+  const [maxPrice, setMaxPrice] = useState<string>(urlMaxPrice);
+  const [minBeds, setMinBeds] = useState(urlMinBeds);
+  const [selectedLocation, setSelectedLocation] = useState<string>("");
+
+  // Update URL when filters change (without triggering navigation)
+  const updateUrlParams = useCallback((params: Record<string, string>) => {
+    const newParams = new URLSearchParams(searchParams.toString());
+    Object.entries(params).forEach(([key, value]) => {
+      if (value) {
+        newParams.set(key, value);
+      } else {
+        newParams.delete(key);
+      }
+    });
+    const newUrl = `${pathname}?${newParams.toString()}`;
+    window.history.replaceState({}, "", newUrl);
+  }, [pathname, searchParams]);
+
+  // Save state to sessionStorage when results change
+  useEffect(() => {
+    if (allProperties.length > 0 && !loading && selectedLocation) {
+      saveState({
+        properties: allProperties,
+        displayCount,
+        scrollY: window.scrollY,
+        apiUsage,
+        selectedLocation,
+        maxPrice,
+        minBeds,
+        sortBy,
+      });
+    }
+  }, [allProperties, displayCount, apiUsage, loading, selectedLocation, maxPrice, minBeds, sortBy]);
+
+  // Save scroll position before navigating away
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (allProperties.length > 0 && selectedLocation) {
+        saveState({
+          properties: allProperties,
+          displayCount,
+          scrollY: window.scrollY,
+          apiUsage,
+          selectedLocation,
+          maxPrice,
+          minBeds,
+          sortBy,
+        });
+      }
+    };
+
+    // Save on any navigation
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    return () => {
+      // Save when component unmounts (navigation within app)
+      handleBeforeUnload();
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [allProperties, displayCount, apiUsage, selectedLocation, maxPrice, minBeds, sortBy]);
+
+  // Restore scroll position after content loads
+  useEffect(() => {
+    if (!loading && !scrollRestored.current && restoredFromStorage.current) {
+      const stored = loadState();
+      if (stored && stored.scrollY > 0) {
+        // Small delay to ensure content is rendered
+        setTimeout(() => {
+          window.scrollTo(0, stored.scrollY);
+        }, 100);
+      }
+      scrollRestored.current = true;
+    }
+  }, [loading]);
 
   // Get sorted and paginated properties
   const sortedProperties = [...allProperties].sort(
@@ -264,18 +397,116 @@ function DealsContent() {
     }
   }, [hasMore, canLoadMoreFromApi, searchLiveProperties, allProperties.length]);
 
-  // Analyze a property - navigate to analyze page with property data
-  const handleAnalyze = (property: PropertyListing) => {
-    // Encode property data in URL and navigate to analyze page
-    const propertyData = encodeURIComponent(JSON.stringify(property));
-    router.push(`/import?property=${propertyData}`);
+  // Analyze a property - create/find saved property and navigate to analyze page
+  const handleAnalyze = async (property: PropertyListing) => {
+    try {
+      // Create property record (or get existing one) via API
+      const response = await api.enqueuePropertyJob({
+        address: property.address,
+        city: property.city,
+        state: property.state,
+        zip_code: property.zip_code,
+        latitude: property.latitude,
+        longitude: property.longitude,
+        list_price: property.price,
+        bedrooms: property.bedrooms,
+        bathrooms: property.bathrooms,
+        sqft: property.sqft || undefined,
+        property_type: property.property_type,
+        source: property.source,
+        source_url: property.source_url,
+        photos: property.photos,
+      });
+
+      // Navigate with just the property ID - much cleaner URL
+      router.push(`/import?id=${response.property_id}&job=${response.job_id}&status=${response.status}`);
+    } catch (err) {
+      console.error("Failed to create property:", err);
+      // Fallback to the old URL-encoded approach
+      const propertyData = encodeURIComponent(JSON.stringify(property));
+      router.push(`/import?property=${propertyData}`);
+    }
   };
 
-  // Initial fetch
+  // Load favorite markets for dropdown
   useEffect(() => {
-    setLoading(true);
-    searchLiveProperties();
+    async function loadMarkets() {
+      try {
+        setLoadingMarkets(true);
+        const markets = await api.getFavoriteMarkets();
+        if (markets.length > 0) {
+          // Convert to location format: "City, ST"
+          const marketLocations = markets.map(m => `${m.name}, ${m.state}`);
+          setAvailableMarkets(marketLocations);
+        }
+      } catch (err) {
+        console.error("Failed to load markets, using defaults:", err);
+      } finally {
+        setLoadingMarkets(false);
+      }
+    }
+    loadMarkets();
   }, []);
+
+  // Try to restore state from sessionStorage on mount
+  useEffect(() => {
+    if (restoredFromStorage.current) return;
+
+    const stored = loadState();
+    if (stored && stored.properties.length > 0) {
+      // Restore from sessionStorage
+      setAllProperties(stored.properties);
+      setDisplayCount(stored.displayCount);
+      setApiUsage(stored.apiUsage);
+      setSelectedLocation(stored.selectedLocation);
+      setMaxPrice(stored.maxPrice);
+      setMinBeds(stored.minBeds);
+      setSortBy(stored.sortBy);
+      setLoading(false);
+      restoredFromStorage.current = true;
+      initialSearchDone.current = true;
+    }
+  }, []);
+
+  // Set initial location from URL param or first available market
+  useEffect(() => {
+    if (loadingMarkets) return; // Wait for markets to load
+
+    if (urlMarket && !initialSearchDone.current) {
+      // Convert market ID to location format
+      const location = marketIdToLocation(urlMarket);
+      setSelectedLocation(location);
+
+      // Add to available markets if not already there
+      if (!availableMarkets.includes(location)) {
+        setAvailableMarkets(prev => [location, ...prev]);
+      }
+    } else if (!selectedLocation && availableMarkets.length > 0) {
+      // Default to first market if none selected
+      setSelectedLocation(availableMarkets[0]);
+    }
+  }, [urlMarket, loadingMarkets, availableMarkets]);
+
+  // Search when location is set (initial load only if not restored)
+  useEffect(() => {
+    if (selectedLocation && !initialSearchDone.current) {
+      initialSearchDone.current = true;
+      setLoading(true);
+      searchLiveProperties();
+    }
+  }, [selectedLocation]);
+
+  // Update URL when filters/sort change
+  useEffect(() => {
+    if (selectedLocation) {
+      updateUrlParams({
+        market: selectedLocation,
+        maxPrice,
+        minBeds,
+        sortBy,
+      });
+    }
+  }, [selectedLocation, maxPrice, minBeds, sortBy, updateUrlParams]);
 
   // Handle search button click
   const handleSearch = () => {
@@ -307,8 +538,9 @@ function DealsContent() {
                   value={selectedLocation}
                   onChange={(e) => setSelectedLocation(e.target.value)}
                   className="input"
+                  disabled={loadingMarkets}
                 >
-                  {LIVE_MARKETS.map((loc) => (
+                  {availableMarkets.map((loc) => (
                     <option key={loc} value={loc}>
                       {loc}
                     </option>
@@ -316,15 +548,21 @@ function DealsContent() {
                 </select>
               </div>
 
-              <div className="w-36">
+              <div className="w-40">
                 <label className="label">Max Price</label>
-                <input
-                  type="number"
-                  value={maxPrice}
-                  onChange={(e) => setMaxPrice(e.target.value)}
-                  placeholder="Any"
-                  className="input"
-                />
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
+                  <input
+                    type="text"
+                    value={maxPrice ? parseInt(maxPrice).toLocaleString() : ""}
+                    onChange={(e) => {
+                      const raw = e.target.value.replace(/[^0-9]/g, "");
+                      setMaxPrice(raw);
+                    }}
+                    placeholder="Any"
+                    className="input pl-7"
+                  />
+                </div>
               </div>
 
               <div className="w-32">
@@ -379,7 +617,7 @@ function DealsContent() {
           </div>
 
           {/* Results */}
-          {loading ? (
+          {loading || loadingMarkets ? (
             <LoadingPage />
           ) : error ? (
             <div className="card text-center py-8">

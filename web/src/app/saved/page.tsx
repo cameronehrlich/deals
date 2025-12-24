@@ -175,7 +175,7 @@ export default function SavedPage() {
   const [error, setError] = useState<string | null>(null);
 
   // Filter & Sort state
-  const [sortBy, setSortBy] = useState<SortOption>("score_desc");
+  const [sortBy, setSortBy] = useState<SortOption>("date_desc");
   const [filterCity, setFilterCity] = useState<string>("");
   const [filterFavoritesOnly, setFilterFavoritesOnly] = useState(false);
   const [showFilters, setShowFilters] = useState(false);

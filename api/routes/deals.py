@@ -54,6 +54,8 @@ def _property_to_detail(prop) -> PropertyDetail:
         state=prop.state,
         zip_code=prop.zip_code,
         full_address=prop.full_address,
+        latitude=prop.latitude,
+        longitude=prop.longitude,
         list_price=prop.list_price,
         estimated_rent=prop.estimated_rent,
         bedrooms=prop.bedrooms,

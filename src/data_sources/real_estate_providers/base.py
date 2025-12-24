@@ -31,6 +31,10 @@ class PropertyListing:
     hoa_fee: Optional[float] = None
     price_per_sqft: Optional[float] = None
 
+    # Location coordinates
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
     # Provider metadata
     provider: str = ""
     raw_data: Optional[dict] = None

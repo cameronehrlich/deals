@@ -198,6 +198,37 @@ class ApiCallLogDB(Base):
         return f"<ApiCallLog {self.provider}:{self.endpoint}>"
 
 
+class JobDB(Base):
+    """Background job queue for async tasks."""
+    __tablename__ = 'jobs'
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+
+    # Job definition
+    job_type = Column(String, nullable=False)  # enrich_market, enrich_property, etc.
+    payload = Column(JSON)  # Job-specific data (e.g., {"market_id": "phoenix_az"})
+    priority = Column(Integer, default=0)  # Higher = more urgent
+
+    # Status tracking
+    status = Column(String, default='pending')  # pending, running, completed, failed, cancelled
+    progress = Column(Integer, default=0)  # 0-100
+    message = Column(String)  # Current status message
+    error = Column(Text)  # Error details if failed
+    result = Column(JSON)  # Job result data
+
+    # Timing
+    created_at = Column(DateTime, default=datetime.utcnow)
+    started_at = Column(DateTime)
+    completed_at = Column(DateTime)
+
+    # Retry handling
+    attempts = Column(Integer, default=0)
+    max_attempts = Column(Integer, default=3)
+
+    def __repr__(self):
+        return f"<Job {self.job_type} ({self.status})>"
+
+
 # Default favorite markets (user's researched list)
 DEFAULT_FAVORITE_MARKETS = [
     {"name": "Indianapolis", "state": "IN", "metro": "Indianapolis-Carmel-Anderson"},
@@ -263,23 +294,53 @@ def init_database(engine=None):
     # Create all tables
     Base.metadata.create_all(engine)
 
-    # Seed favorite markets if empty
+    # Seed all metros from local data
     session = get_session(engine)
     try:
-        if session.query(MarketDB).count() == 0:
-            for market_data in DEFAULT_FAVORITE_MARKETS:
-                market = MarketDB(
-                    id=f"{market_data['name'].lower().replace(' ', '_')}_{market_data['state'].lower()}",
-                    name=market_data["name"],
-                    state=market_data["state"],
-                    metro=market_data.get("metro"),
-                    is_favorite=True,
-                    is_supported=True,
-                    api_support={"listings": True, "income": True},
-                )
-                session.add(market)
+        # Import local metro data
+        from src.data_sources.metros import US_METROS
+        from src.data_sources.hud_fmr import EMBEDDED_FMR_DATA
+
+        # Get IDs of default favorites
+        default_favorite_ids = {
+            f"{m['name'].lower().replace(' ', '_')}_{m['state'].lower()}"
+            for m in DEFAULT_FAVORITE_MARKETS
+        }
+
+        # Get existing market IDs to avoid duplicates
+        existing_ids = {m.id for m in session.query(MarketDB).all()}
+
+        added = 0
+        for metro in US_METROS:
+            if metro.id in existing_ids:
+                continue
+
+            # Check if this metro has HUD data (full support)
+            has_hud = metro.id in EMBEDDED_FMR_DATA or metro.has_hud_data
+
+            market = MarketDB(
+                id=metro.id,
+                name=metro.city,
+                state=metro.state,
+                metro=metro.metro_name,
+                is_favorite=metro.id in default_favorite_ids,
+                is_supported=True,
+                api_support={
+                    "listings": metro.has_redfin_data,
+                    "bls": metro.has_bls_data,
+                    "census": metro.has_census_data,
+                    "hud": has_hud,
+                },
+            )
+            session.add(market)
+            added += 1
+
+        if added > 0:
             session.commit()
-            print(f"Seeded {len(DEFAULT_FAVORITE_MARKETS)} favorite markets")
+            print(f"Seeded {added} markets from local metro data")
+    except Exception as e:
+        print(f"Warning: Could not seed metros: {e}")
+        session.rollback()
     finally:
         session.close()
 

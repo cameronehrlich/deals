@@ -45,25 +45,41 @@ class MarketSummary(BaseModel):
 
 
 class MarketDetail(MarketSummary):
-    """Full market data."""
+    """Full market data with comprehensive scores."""
     region: Optional[str] = None
+    # Demographics
     population_growth_1yr: Optional[float] = None
     population_growth_5yr: Optional[float] = None
     unemployment_rate: Optional[float] = None
+    labor_force: Optional[int] = None
     major_employers: list[str] = Field(default_factory=list)
     median_household_income: Optional[float] = None
+    # Housing market
     price_change_5yr: Optional[float] = None
     rent_change_1yr: Optional[float] = None
     months_of_inventory: Optional[float] = None
     days_on_market_avg: Optional[int] = None
+    sale_to_list_ratio: Optional[float] = None
+    pct_sold_above_list: Optional[float] = None
     price_trend: str = "stable"
     rent_trend: str = "stable"
+    # Regulatory & costs
     landlord_friendly: bool = True
+    landlord_friendly_score: Optional[int] = None
     property_tax_rate: Optional[float] = None
+    has_state_income_tax: Optional[bool] = None
     insurance_risk: Optional[str] = None
+    insurance_risk_factors: list[str] = Field(default_factory=list)
+    # Score components
     affordability_score: float = 50.0
     stability_score: float = 50.0
     liquidity_score: float = 50.0
+    operating_cost_score: float = 50.0
+    regulatory_score: float = 50.0
+    # Data quality
+    data_completeness: float = 0.0
+    data_sources: list[str] = Field(default_factory=list)
+    enrichment_pending: bool = False  # True if market data is still being fetched
 
 
 class MarketsResponse(BaseModel):
@@ -93,6 +109,8 @@ class PropertySummary(BaseModel):
 class PropertyDetail(PropertySummary):
     """Full property data."""
     full_address: str
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
     year_built: Optional[int] = None
     lot_size_sqft: Optional[int] = None
     stories: Optional[int] = None

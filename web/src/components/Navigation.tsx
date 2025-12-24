@@ -10,9 +10,9 @@ import {
   Building2,
   BarChart3,
   Bookmark,
+  Settings,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { ApiUsageIndicator } from "./ApiUsageIndicator";
 
 const navigation = [
   { name: "Dashboard", href: "/", icon: Home },
@@ -65,9 +65,15 @@ export function Navigation() {
             </div>
           </div>
 
-          {/* Right side - API Usage */}
-          <div className="hidden sm:flex items-center gap-4">
-            <ApiUsageIndicator />
+          {/* Right side - Admin */}
+          <div className="hidden sm:flex items-center">
+            <Link
+              href="/admin/jobs"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md transition-colors"
+            >
+              <Settings className="h-4 w-4" />
+              Admin
+            </Link>
           </div>
         </div>
       </div>

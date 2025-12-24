@@ -20,6 +20,7 @@ import {
   BarChart3,
   Bookmark,
   BookmarkCheck,
+  ExternalLink,
   Footprints,
   Train,
   Bike,
@@ -30,7 +31,7 @@ import {
   ShieldAlert,
   ShieldCheck,
 } from "lucide-react";
-import { api, ImportUrlResponse, Deal, MacroDataResponse, PropertyListing, AllLocationDataResponse } from "@/lib/api";
+import { api, ImportUrlResponse, Deal, MacroDataResponse, PropertyListing, AllLocationDataResponse, Job, EnqueuePropertyResponse, SavedProperty } from "@/lib/api";
 import {
   formatCurrency,
   formatPercent,
@@ -81,13 +82,191 @@ function AnalyzePageContent() {
   const [loadingLocation, setLoadingLocation] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
 
+  // Job-based enrichment state
+  const [currentJob, setCurrentJob] = useState<Job | null>(null);
+  const [jobPropertyId, setJobPropertyId] = useState<string | null>(null);
+  const [useJobBasedFlow, setUseJobBasedFlow] = useState(true); // Feature flag
+
   // Check if running in Electron on mount
   useEffect(() => {
     setIsElectronApp(isElectron());
   }, []);
 
-  // Check for property data in URL params
+  // Helper to convert saved property to result format
+  const handleJobComplete = async (savedProperty: SavedProperty) => {
+    // Convert saved property to result format
+    const analysisData = savedProperty.analysis_data as {
+      property?: Record<string, unknown>;
+      financials?: Record<string, unknown>;
+      financial_metrics?: Record<string, unknown>;
+      score?: Record<string, unknown>;
+      pros?: string[];
+      cons?: string[];
+      market?: Record<string, unknown>;
+    };
+
+    // Use financial_metrics for computed values, fall back to financials for raw data
+    const metrics = analysisData?.financial_metrics || {};
+    const financials = analysisData?.financials || {};
+    const scoreData = analysisData?.score || {};
+
+    const result: ImportUrlResponse = {
+      success: true,
+      deal: {
+        id: savedProperty.id,
+        property: {
+          id: savedProperty.id,
+          address: savedProperty.address,
+          city: savedProperty.city,
+          state: savedProperty.state,
+          zip_code: savedProperty.zip_code || "",
+          latitude: savedProperty.latitude,
+          longitude: savedProperty.longitude,
+          list_price: savedProperty.list_price || 0,
+          estimated_rent: savedProperty.estimated_rent,
+          bedrooms: savedProperty.bedrooms || 3,
+          bathrooms: savedProperty.bathrooms || 2,
+          sqft: savedProperty.sqft,
+          property_type: savedProperty.property_type || "single_family",
+          days_on_market: savedProperty.days_on_market || 0,
+        },
+        // Use denormalized scores from saved property, or from analysis_data
+        score: {
+          overall_score: savedProperty.overall_score || (scoreData.overall_score as number) || 0,
+          financial_score: savedProperty.financial_score || (scoreData.financial_score as number) || 0,
+          market_score: savedProperty.market_score || (scoreData.market_score as number) || 0,
+          risk_score: savedProperty.risk_score || (scoreData.risk_score as number) || 0,
+          liquidity_score: savedProperty.liquidity_score || (scoreData.liquidity_score as number) || 0,
+          strategy_scores: (scoreData.strategy_scores as Record<string, number>) || {},
+        },
+        // Use financial_metrics for computed values like cash_on_cash_return
+        financials: {
+          monthly_cash_flow: savedProperty.cash_flow || (financials.monthly_cash_flow as number) || 0,
+          annual_cash_flow: (financials.annual_cash_flow as number) || (savedProperty.cash_flow ? savedProperty.cash_flow * 12 : 0),
+          cash_on_cash_return: savedProperty.cash_on_cash || (metrics.cash_on_cash_return as number) || 0,
+          cap_rate: savedProperty.cap_rate || (metrics.cap_rate as number) || 0,
+          gross_rent_multiplier: (metrics.gross_rent_multiplier as number) || 0,
+          rent_to_price_ratio: (metrics.rent_to_price_ratio as number) || 0,
+          total_cash_invested: (metrics.total_cash_invested as number) || (financials.total_cash_needed as number) || 0,
+          break_even_occupancy: (metrics.break_even_occupancy as number) || 0,
+        },
+        market_name: analysisData?.market ? (analysisData.market.name as string) : undefined,
+        pipeline_status: savedProperty.pipeline_status || "analyzed",
+        pros: analysisData?.pros || [],
+        cons: analysisData?.cons || [],
+      },
+      source: savedProperty.source || "manual",
+      message: "Successfully analyzed property",
+      warnings: [],
+      saved_id: savedProperty.id,
+    };
+
+    setResult(result);
+    setSavedId(savedProperty.id);
+    if (result.deal?.property.list_price) {
+      setOfferPrice(result.deal.property.list_price);
+    }
+
+    // Set location data if available
+    if (savedProperty.location_data) {
+      setLocationData(savedProperty.location_data as AllLocationDataResponse);
+    }
+  };
+
+  // Poll job status when we have a running job
   useEffect(() => {
+    if (!currentJob || currentJob.status === "completed" || currentJob.status === "failed") {
+      return;
+    }
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const updatedJob = await api.getJob(currentJob.id);
+        setCurrentJob(updatedJob);
+
+        // Update loading step based on job progress
+        if (updatedJob.message) {
+          setLoadingStep(updatedJob.message);
+        }
+
+        // Job completed - fetch and display results
+        if (updatedJob.status === "completed") {
+          clearInterval(pollInterval);
+          setLoading(false);
+          setLoadingStep("");
+
+          // Fetch the enriched property
+          if (jobPropertyId) {
+            try {
+              const savedProperty = await api.getSavedProperty(jobPropertyId);
+              if (savedProperty) {
+                await handleJobComplete(savedProperty);
+              }
+            } catch (err) {
+              console.error("Failed to fetch enriched property:", err);
+              setError("Property enriched but failed to load results");
+            }
+          }
+        } else if (updatedJob.status === "failed") {
+          clearInterval(pollInterval);
+          setLoading(false);
+          setLoadingStep("");
+          setError(updatedJob.error || "Property enrichment failed");
+        }
+      } catch (err) {
+        console.error("Failed to poll job status:", err);
+      }
+    }, 1000); // Poll every second
+
+    return () => clearInterval(pollInterval);
+  }, [currentJob, jobPropertyId]);
+
+  // Check for property data in URL params (supports both new ID-based and legacy JSON formats)
+  useEffect(() => {
+    // New format: ?id=<propertyId>&job=<jobId>&status=<status>
+    const idParam = searchParams.get("id");
+    const jobParam = searchParams.get("job");
+    const statusParam = searchParams.get("status");
+
+    if (idParam && !result && !loading) {
+      setJobPropertyId(idParam);
+
+      if (statusParam === "already_analyzed") {
+        // Property already analyzed - just fetch and display
+        setLoading(true);
+        setLoadingStep("Loading saved analysis...");
+        api.getSavedProperty(idParam)
+          .then(savedProperty => {
+            if (savedProperty) {
+              handleJobComplete(savedProperty);
+            }
+          })
+          .catch(err => {
+            console.error("Failed to load property:", err);
+            setError("Failed to load saved property");
+          })
+          .finally(() => {
+            setLoading(false);
+            setLoadingStep("");
+          });
+      } else if (jobParam) {
+        // Job in progress - start polling
+        setLoading(true);
+        setLoadingStep("Enriching property...");
+        api.getJob(jobParam)
+          .then(job => {
+            setCurrentJob(job);
+          })
+          .catch(err => {
+            console.error("Failed to get job status:", err);
+            setError("Failed to check job status");
+            setLoading(false);
+          });
+      }
+      return;
+    }
+
+    // Legacy format: ?property=<JSON encoded data>
     const propertyParam = searchParams.get("property");
     if (propertyParam && !passedProperty && !result) {
       try {
@@ -97,7 +276,7 @@ function AnalyzePageContent() {
         console.error("Failed to parse property data:", e);
       }
     }
-  }, [searchParams, passedProperty, result]);
+  }, [searchParams, passedProperty, result, loading]);
 
   // Auto-analyze when property is passed
   useEffect(() => {
@@ -115,41 +294,86 @@ function AnalyzePageContent() {
       setError(null);
       setResult(null);
       setOfferPrice(null);
-      setLoadingStep("Loading property details...");
+      setCurrentJob(null);
+      setJobPropertyId(null);
+      setLoadingStep("Creating property record...");
 
-      // Simulate progress steps for visual feedback
-      const stepTimer1 = setTimeout(() => setLoadingStep("Getting rent estimates..."), 800);
-      const stepTimer2 = setTimeout(() => setLoadingStep("Analyzing market data..."), 1600);
-      const stepTimer3 = setTimeout(() => setLoadingStep("Calculating financials..."), 2400);
+      if (useJobBasedFlow) {
+        // Job-based flow: Create property and enqueue enrichment job
+        const jobResponse = await api.enqueuePropertyJob({
+          address: passedProperty.address,
+          city: passedProperty.city,
+          state: passedProperty.state,
+          zip_code: passedProperty.zip_code,
+          latitude: passedProperty.latitude,
+          longitude: passedProperty.longitude,
+          list_price: passedProperty.price,
+          bedrooms: passedProperty.bedrooms,
+          bathrooms: passedProperty.bathrooms,
+          sqft: passedProperty.sqft || undefined,
+          property_type: passedProperty.property_type,
+          source: passedProperty.source,
+          source_url: passedProperty.source_url,
+          photos: passedProperty.photos,
+          down_payment_pct: parseFloat(downPaymentPct) / 100,
+          interest_rate: parseFloat(interestRate) / 100,
+        });
 
-      const response = await api.importParsed({
-        address: passedProperty.address,
-        city: passedProperty.city,
-        state: passedProperty.state,
-        zip_code: passedProperty.zip_code,
-        list_price: passedProperty.price,
-        bedrooms: passedProperty.bedrooms,
-        bathrooms: passedProperty.bathrooms,
-        sqft: passedProperty.sqft || undefined,
-        property_type: passedProperty.property_type,
-        source: passedProperty.source,
-        source_url: passedProperty.source_url,
-        down_payment_pct: parseFloat(downPaymentPct) / 100,
-        interest_rate: parseFloat(interestRate) / 100,
-      });
+        // Store property ID
+        setJobPropertyId(jobResponse.property_id);
 
-      // Clear timers
-      clearTimeout(stepTimer1);
-      clearTimeout(stepTimer2);
-      clearTimeout(stepTimer3);
+        // If already analyzed, fetch the property directly
+        if (jobResponse.status === "already_analyzed") {
+          setLoadingStep("Loading saved analysis...");
+          const savedProperty = await api.getSavedProperty(jobResponse.property_id);
+          await handleJobComplete(savedProperty);
+          setLoading(false);
+          setLoadingStep("");
+          setAutoAnalyzing(false);
+        } else {
+          // Need to poll for job completion
+          setLoadingStep("Queued for enrichment...");
+          const job = await api.getJob(jobResponse.job_id);
+          setCurrentJob(job);
+          setAutoAnalyzing(false);
+          // Note: loading state continues, polling useEffect will handle completion
+        }
+      } else {
+        // Legacy sync flow
+        const stepTimer1 = setTimeout(() => setLoadingStep("Getting rent estimates..."), 800);
+        const stepTimer2 = setTimeout(() => setLoadingStep("Analyzing market data..."), 1600);
+        const stepTimer3 = setTimeout(() => setLoadingStep("Calculating financials..."), 2400);
 
-      setResult(response);
-      if (response.deal?.property.list_price) {
-        setOfferPrice(response.deal.property.list_price);
+        const response = await api.importParsed({
+          address: passedProperty.address,
+          city: passedProperty.city,
+          state: passedProperty.state,
+          zip_code: passedProperty.zip_code,
+          list_price: passedProperty.price,
+          bedrooms: passedProperty.bedrooms,
+          bathrooms: passedProperty.bathrooms,
+          sqft: passedProperty.sqft || undefined,
+          property_type: passedProperty.property_type,
+          source: passedProperty.source,
+          source_url: passedProperty.source_url,
+          down_payment_pct: parseFloat(downPaymentPct) / 100,
+          interest_rate: parseFloat(interestRate) / 100,
+        });
+
+        clearTimeout(stepTimer1);
+        clearTimeout(stepTimer2);
+        clearTimeout(stepTimer3);
+
+        setResult(response);
+        if (response.deal?.property.list_price) {
+          setOfferPrice(response.deal.property.list_price);
+        }
+        setLoading(false);
+        setLoadingStep("");
+        setAutoAnalyzing(false);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Analysis failed");
-    } finally {
       setLoading(false);
       setLoadingStep("");
       setAutoAnalyzing(false);
@@ -187,10 +411,10 @@ function AnalyzePageContent() {
       setError(null);
       setResult(null);
       setOfferPrice(null);
+      setCurrentJob(null);
+      setJobPropertyId(null);
 
-      let response: ImportUrlResponse;
-
-      // If running in Electron, use local scraping
+      // If running in Electron, use local scraping + job-based enrichment
       if (isElectronApp) {
         setLoadingStep("Scraping property locally...");
 
@@ -201,34 +425,69 @@ function AnalyzePageContent() {
           throw new Error(scrapeResult?.error || "Failed to scrape property locally");
         }
 
-        setLoadingStep("Analyzing with API...");
+        if (useJobBasedFlow) {
+          // Job-based flow: Create property and enqueue enrichment
+          setLoadingStep("Creating property record...");
 
-        // Send parsed data to API for analysis
-        response = await api.importParsed({
-          address: scrapeResult.data.address,
-          city: scrapeResult.data.city,
-          state: scrapeResult.data.state,
-          zip_code: scrapeResult.data.zip_code,
-          list_price: scrapeResult.data.list_price,
-          bedrooms: scrapeResult.data.bedrooms,
-          bathrooms: scrapeResult.data.bathrooms,
-          sqft: scrapeResult.data.sqft,
-          property_type: scrapeResult.data.property_type,
-          source: scrapeResult.data.source,
-          source_url: url.trim(),
-          down_payment_pct: parseFloat(downPaymentPct) / 100,
-          interest_rate: parseFloat(interestRate) / 100,
-        });
+          const jobResponse = await api.enqueuePropertyJob({
+            address: scrapeResult.data.address,
+            city: scrapeResult.data.city,
+            state: scrapeResult.data.state,
+            zip_code: scrapeResult.data.zip_code,
+            list_price: scrapeResult.data.list_price,
+            bedrooms: scrapeResult.data.bedrooms,
+            bathrooms: scrapeResult.data.bathrooms,
+            sqft: scrapeResult.data.sqft || undefined,
+            property_type: scrapeResult.data.property_type,
+            source: scrapeResult.data.source,
+            source_url: url.trim(),
+            down_payment_pct: parseFloat(downPaymentPct) / 100,
+            interest_rate: parseFloat(interestRate) / 100,
+          });
+
+          setJobPropertyId(jobResponse.property_id);
+          setLoadingStep("Queued for enrichment...");
+
+          const job = await api.getJob(jobResponse.job_id);
+          setCurrentJob(job);
+          // Polling useEffect will handle completion
+        } else {
+          // Legacy sync flow
+          setLoadingStep("Analyzing with API...");
+
+          const response = await api.importParsed({
+            address: scrapeResult.data.address,
+            city: scrapeResult.data.city,
+            state: scrapeResult.data.state,
+            zip_code: scrapeResult.data.zip_code,
+            list_price: scrapeResult.data.list_price,
+            bedrooms: scrapeResult.data.bedrooms,
+            bathrooms: scrapeResult.data.bathrooms,
+            sqft: scrapeResult.data.sqft,
+            property_type: scrapeResult.data.property_type,
+            source: scrapeResult.data.source,
+            source_url: url.trim(),
+            down_payment_pct: parseFloat(downPaymentPct) / 100,
+            interest_rate: parseFloat(interestRate) / 100,
+          });
+
+          setResult(response);
+          if (response.deal?.property.list_price) {
+            setOfferPrice(response.deal.property.list_price);
+          }
+          setLoading(false);
+          setLoadingStep("");
+        }
       } else {
         // Browser mode: use server-side scraping (may be blocked)
+        // Keep sync flow for now since server scrapes
         setLoadingStep("Fetching property details...");
 
-        // Simulate progress steps
         const stepTimer = setTimeout(() => setLoadingStep("Getting rent estimates..."), 2000);
         const stepTimer2 = setTimeout(() => setLoadingStep("Analyzing market data..."), 4000);
         const stepTimer3 = setTimeout(() => setLoadingStep("Calculating financials..."), 6000);
 
-        response = await api.importFromUrl({
+        const response = await api.importFromUrl({
           url: url.trim(),
           down_payment_pct: parseFloat(downPaymentPct) / 100,
           interest_rate: parseFloat(interestRate) / 100,
@@ -237,15 +496,16 @@ function AnalyzePageContent() {
         clearTimeout(stepTimer);
         clearTimeout(stepTimer2);
         clearTimeout(stepTimer3);
-      }
 
-      setResult(response);
-      if (response.deal?.property.list_price) {
-        setOfferPrice(response.deal.property.list_price);
+        setResult(response);
+        if (response.deal?.property.list_price) {
+          setOfferPrice(response.deal.property.list_price);
+        }
+        setLoading(false);
+        setLoadingStep("");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Import failed. Try using the Calculator for manual entry.");
-    } finally {
       setLoading(false);
       setLoadingStep("");
     }
@@ -260,22 +520,39 @@ function AnalyzePageContent() {
     setSavedId(null);
     setLocationData(null);
     setLocationError(null);
+    setCurrentJob(null);
+    setJobPropertyId(null);
     // Clear URL params
     router.replace("/import");
   };
+
+  // Get coordinates from available sources
+  const getCoordinates = (): { latitude: number; longitude: number } | null => {
+    // Try passedProperty first (from search results)
+    if (passedProperty?.latitude && passedProperty?.longitude) {
+      return { latitude: passedProperty.latitude, longitude: passedProperty.longitude };
+    }
+    // Try result.deal.property (from API response)
+    if (result?.deal?.property?.latitude && result?.deal?.property?.longitude) {
+      return {
+        latitude: result.deal.property.latitude,
+        longitude: result.deal.property.longitude
+      };
+    }
+    return null;
+  };
+
+  const coordinates = getCoordinates();
 
   // Fetch location data (Walk Score, Flood Zone, Noise, Schools)
   const handleFetchLocationData = async () => {
     if (!result?.deal?.property || loadingLocation) return;
 
     const property = result.deal.property;
+    const coords = getCoordinates();
 
-    // Need coordinates - try to use passedProperty lat/lon or fall back
-    const latitude = passedProperty?.latitude;
-    const longitude = passedProperty?.longitude;
-
-    if (!latitude || !longitude) {
-      setLocationError("Location coordinates not available for this property.");
+    if (!coords) {
+      setLocationError("Location coordinates not available for this property. Try analyzing a property from search results.");
       return;
     }
 
@@ -287,8 +564,8 @@ function AnalyzePageContent() {
 
       const data = await api.getAllLocationData({
         address: fullAddress,
-        latitude,
-        longitude,
+        latitude: coords.latitude,
+        longitude: coords.longitude,
         zip_code: property.zip_code,
       });
 
@@ -312,25 +589,49 @@ function AnalyzePageContent() {
     try {
       setSaving(true);
 
-      // Save property with full analysis data including pros/cons
+      const property = result.deal.property;
+      const coords = getCoordinates();
+
+      // Auto-fetch location data if we have coordinates and don't have it yet
+      let locationDataToSave = locationData;
+      if (coords && !locationData) {
+        try {
+          const fullAddress = `${property.address}, ${property.city}, ${property.state} ${property.zip_code || ''}`;
+          locationDataToSave = await api.getAllLocationData({
+            address: fullAddress,
+            latitude: coords.latitude,
+            longitude: coords.longitude,
+            zip_code: property.zip_code,
+          });
+          // Update local state so it displays in the UI
+          setLocationData(locationDataToSave);
+        } catch (err) {
+          console.warn("Failed to fetch location data during save:", err);
+          // Continue with save even if location fetch fails
+        }
+      }
+
+      // Save property with full analysis data including location insights
       const savedProperty = await api.saveProperty({
         // Property location
-        address: result.deal.property.address,
-        city: result.deal.property.city,
-        state: result.deal.property.state,
-        zip_code: result.deal.property.zip_code,
+        address: property.address,
+        city: property.city,
+        state: property.state,
+        zip_code: property.zip_code,
+        latitude: coords?.latitude,
+        longitude: coords?.longitude,
         // Property details
-        list_price: result.deal.property.list_price,
-        estimated_rent: result.deal.property.estimated_rent,
-        bedrooms: result.deal.property.bedrooms,
-        bathrooms: result.deal.property.bathrooms,
-        sqft: result.deal.property.sqft,
-        property_type: result.deal.property.property_type,
-        days_on_market: result.deal.property.days_on_market,
-        photos: passedProperty?.photos,
+        list_price: property.list_price,
+        estimated_rent: property.estimated_rent,
+        bedrooms: property.bedrooms,
+        bathrooms: property.bathrooms,
+        sqft: property.sqft,
+        property_type: property.property_type,
+        days_on_market: property.days_on_market,
         // Source
         source: result.source || "manual",
         source_url: passedProperty?.source_url || url || undefined,
+        photos: passedProperty?.photos,
         // All score dimensions
         overall_score: result.deal.score?.overall_score,
         financial_score: result.deal.score?.financial_score,
@@ -341,15 +642,27 @@ function AnalyzePageContent() {
         cash_flow: result.deal.financials?.monthly_cash_flow,
         cash_on_cash: result.deal.financials?.cash_on_cash_return,
         cap_rate: result.deal.financials?.cap_rate,
-        // Full analysis data - this includes pros, cons, financials details, etc.
+        // Full analysis data - includes pros, cons, financials details
         analysis_data: {
-          property: result.deal.property,
+          property: property,
           financials: result.deal.financials,
           score: result.deal.score,
           pros: result.deal.pros,
           cons: result.deal.cons,
           market_name: result.deal.market_name,
         },
+        // Location data (if fetched)
+        location_data: locationDataToSave ? {
+          walk_score: locationDataToSave.walk_score,
+          walk_description: locationDataToSave.walk_description,
+          transit_score: locationDataToSave.transit_score,
+          transit_description: locationDataToSave.transit_description,
+          bike_score: locationDataToSave.bike_score,
+          bike_description: locationDataToSave.bike_description,
+          noise: locationDataToSave.noise,
+          schools: locationDataToSave.schools,
+          flood_zone: locationDataToSave.flood_zone,
+        } : undefined,
       });
 
       if (savedProperty?.id) {
@@ -878,9 +1191,9 @@ function AnalyzePageContent() {
                   {!locationData && (
                     <button
                       onClick={handleFetchLocationData}
-                      disabled={loadingLocation || !passedProperty?.latitude}
+                      disabled={loadingLocation || !coordinates}
                       className="btn-outline text-sm flex items-center gap-2"
-                      title={!passedProperty?.latitude ? "Coordinates not available for this property" : undefined}
+                      title={!coordinates ? "Coordinates not available for this property" : undefined}
                     >
                       {loadingLocation ? (
                         <>
@@ -1157,6 +1470,15 @@ function AnalyzePageContent() {
                     </>
                   )}
                 </button>
+                {savedId && (
+                  <button
+                    onClick={() => router.push(`/saved/${savedId}`)}
+                    className="btn-primary flex items-center gap-2"
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                    View Saved Property
+                  </button>
+                )}
               </div>
             </>
           )}
@@ -1190,39 +1512,73 @@ function AnalyzePageContent() {
             <div className="card text-center py-12">
               <LoadingSpinner size="lg" />
               <h3 className="text-lg font-medium text-gray-900 mt-4">
-                Importing property...
+                {currentJob ? "Enriching property..." : "Importing property..."}
               </h3>
               <p className="text-gray-500 mt-1">
                 {loadingStep || "Fetching property data and enriching with market insights"}
               </p>
+
+              {/* Job progress bar */}
+              {currentJob && currentJob.progress > 0 && (
+                <div className="mt-4 max-w-xs mx-auto">
+                  <div className="w-full bg-gray-200 rounded-full h-2">
+                    <div
+                      className="bg-primary-600 h-2 rounded-full transition-all duration-300"
+                      style={{ width: `${currentJob.progress}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">{currentJob.progress}% complete</p>
+                </div>
+              )}
+
               <div className="mt-6 max-w-xs mx-auto">
                 <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
                   <div className={cn(
                     "w-2 h-2 rounded-full",
-                    loadingStep.includes("property") ? "bg-blue-500 animate-pulse" : "bg-gray-300"
+                    loadingStep.toLowerCase().includes("property") || loadingStep.toLowerCase().includes("creat") ? "bg-blue-500 animate-pulse" :
+                    (currentJob?.progress || 0) >= 10 ? "bg-green-500" : "bg-gray-300"
                   )} />
                   <span>Property details</span>
                 </div>
                 <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
                   <div className={cn(
                     "w-2 h-2 rounded-full",
-                    loadingStep.includes("rent") ? "bg-blue-500 animate-pulse" : "bg-gray-300"
+                    loadingStep.toLowerCase().includes("rent") ? "bg-blue-500 animate-pulse" :
+                    (currentJob?.progress || 0) >= 30 ? "bg-green-500" : "bg-gray-300"
                   )} />
-                  <span>Rent estimates (RentCast)</span>
+                  <span>Rent estimates</span>
                 </div>
                 <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
                   <div className={cn(
                     "w-2 h-2 rounded-full",
-                    loadingStep.includes("market") ? "bg-blue-500 animate-pulse" : "bg-gray-300"
+                    loadingStep.toLowerCase().includes("market") ? "bg-blue-500 animate-pulse" :
+                    (currentJob?.progress || 0) >= 50 ? "bg-green-500" : "bg-gray-300"
                   )} />
                   <span>Market analysis</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
+                  <div className={cn(
+                    "w-2 h-2 rounded-full",
+                    loadingStep.toLowerCase().includes("financial") || loadingStep.toLowerCase().includes("analy") ? "bg-blue-500 animate-pulse" :
+                    (currentJob?.progress || 0) >= 60 ? "bg-green-500" : "bg-gray-300"
+                  )} />
+                  <span>Financial calculations</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
+                  <div className={cn(
+                    "w-2 h-2 rounded-full",
+                    loadingStep.toLowerCase().includes("walk") ? "bg-blue-500 animate-pulse" :
+                    (currentJob?.progress || 0) >= 70 ? "bg-green-500" : "bg-gray-300"
+                  )} />
+                  <span>Walk Score</span>
                 </div>
                 <div className="flex items-center gap-2 text-sm text-gray-500">
                   <div className={cn(
                     "w-2 h-2 rounded-full",
-                    loadingStep.includes("financials") ? "bg-blue-500 animate-pulse" : "bg-gray-300"
+                    loadingStep.toLowerCase().includes("flood") ? "bg-blue-500 animate-pulse" :
+                    (currentJob?.progress || 0) >= 85 ? "bg-green-500" : "bg-gray-300"
                   )} />
-                  <span>Financial calculations</span>
+                  <span>Flood zone check</span>
                 </div>
               </div>
             </div>

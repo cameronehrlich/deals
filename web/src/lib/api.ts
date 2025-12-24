@@ -27,20 +27,33 @@ export interface MarketDetail extends Market {
   population_growth_1yr?: number;
   population_growth_5yr?: number;
   unemployment_rate?: number;
+  labor_force?: number;
   major_employers: string[];
   median_household_income?: number;
   price_change_5yr?: number;
   rent_change_1yr?: number;
   months_of_inventory?: number;
   days_on_market_avg?: number;
+  sale_to_list_ratio?: number;
+  pct_sold_above_list?: number;
   price_trend: string;
   rent_trend: string;
   landlord_friendly: boolean;
+  landlord_friendly_score?: number;
   property_tax_rate?: number;
+  has_state_income_tax?: boolean;
   insurance_risk?: string;
+  insurance_risk_factors?: string[];
+  // Score components
   affordability_score: number;
   stability_score: number;
   liquidity_score: number;
+  operating_cost_score?: number;
+  regulatory_score?: number;
+  // Data quality
+  data_completeness?: number;
+  data_sources?: string[];
+  enrichment_pending?: boolean;
 }
 
 export interface Property {
@@ -49,6 +62,8 @@ export interface Property {
   city: string;
   state: string;
   zip_code: string;
+  latitude?: number;
+  longitude?: number;
   list_price: number;
   estimated_rent?: number;
   bedrooms: number;
@@ -147,6 +162,7 @@ export interface ImportUrlResponse {
   source?: string;
   message: string;
   warnings: string[];
+  saved_id?: string;
 }
 
 export interface RentEstimateRequest {
@@ -338,6 +354,9 @@ export interface SavedProperty {
     created_at: string;
   }>;
 
+  // Full analysis data (JSON blob from job)
+  analysis_data?: Record<string, unknown>;
+
   // Pipeline
   pipeline_status: string;
   is_favorite: boolean;
@@ -371,12 +390,19 @@ export interface SavedMarket {
   name: string;
   state: string;
   metro?: string;
+  region?: string;
   is_favorite: boolean;
   is_supported: boolean;
   api_support?: Record<string, boolean>;
+  // Scores
   overall_score: number;
   cash_flow_score: number;
   growth_score: number;
+  affordability_score?: number;
+  stability_score?: number;
+  liquidity_score?: number;
+  operating_cost_score?: number;
+  regulatory_score?: number;
   // Market data fields
   median_home_price?: number;
   median_rent?: number;
@@ -386,6 +412,13 @@ export interface SavedMarket {
   unemployment_rate?: number;
   days_on_market?: number;
   months_of_inventory?: number;
+  population?: number;
+  landlord_friendly_score?: number;
+  property_tax_rate?: number;
+  insurance_risk?: string;
+  // Data quality
+  data_completeness?: number;
+  data_sources?: string[];
 }
 
 // Metro suggestion for autocomplete
@@ -395,6 +428,7 @@ export interface MetroSuggestion {
   metro: string;
   median_price?: number;
   median_rent?: number;
+  has_full_support?: boolean;
 }
 
 class ApiClient {
@@ -691,6 +725,18 @@ class ApiClient {
     cap_rate?: number;
     // Full analysis data (includes pros/cons)
     analysis_data?: Record<string, unknown>;
+    // Location data (Walk Score, Flood Zone, Noise, Schools)
+    location_data?: {
+      walk_score?: number;
+      walk_description?: string;
+      transit_score?: number;
+      transit_description?: string;
+      bike_score?: number;
+      bike_description?: string;
+      noise?: Record<string, unknown>;
+      schools?: Array<Record<string, unknown>>;
+      flood_zone?: Record<string, unknown>;
+    };
   }): Promise<SavedProperty> {
     return this.fetch("/api/saved/properties", {
       method: "POST",
@@ -771,6 +817,12 @@ class ApiClient {
     });
   }
 
+  async refreshMarketData(marketId: string): Promise<SavedMarket> {
+    return this.fetch(`/api/saved/markets/${marketId}/refresh`, {
+      method: "POST",
+    });
+  }
+
   async searchMetros(query: string, limit: number = 10): Promise<MetroSuggestion[]> {
     return this.fetch(`/api/saved/markets/search?q=${encodeURIComponent(query)}&limit=${limit}`);
   }
@@ -833,6 +885,125 @@ class ApiClient {
 
     return this.fetch(`/api/import/all-location-data?${searchParams}`);
   }
+
+  // Background Jobs
+  async createJob(params: {
+    job_type: string;
+    payload?: Record<string, unknown>;
+    priority?: number;
+  }): Promise<Job> {
+    return this.fetch("/api/jobs", {
+      method: "POST",
+      body: JSON.stringify(params),
+    });
+  }
+
+  async enqueueMarketJobs(params?: {
+    market_ids?: string[];
+    favorites_only?: boolean;
+  }): Promise<{ jobs_created: number; job_ids: string[] }> {
+    return this.fetch("/api/jobs/enqueue-markets", {
+      method: "POST",
+      body: JSON.stringify(params || {}),
+    });
+  }
+
+  async getJobs(params?: {
+    status?: string;
+    job_type?: string;
+    limit?: number;
+  }): Promise<Job[]> {
+    const searchParams = new URLSearchParams();
+    if (params?.status) searchParams.set("status", params.status);
+    if (params?.job_type) searchParams.set("job_type", params.job_type);
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+
+    return this.fetch(`/api/jobs?${searchParams}`);
+  }
+
+  async getJobStats(): Promise<JobStats> {
+    return this.fetch("/api/jobs/stats");
+  }
+
+  async getJob(jobId: string): Promise<Job> {
+    return this.fetch(`/api/jobs/${jobId}`);
+  }
+
+  async cancelJob(jobId: string): Promise<Job> {
+    return this.fetch(`/api/jobs/${jobId}/cancel`, {
+      method: "POST",
+    });
+  }
+
+  async cancelJobsByType(jobType: string): Promise<{ cancelled: number }> {
+    return this.fetch(`/api/jobs/cancel-by-type/${jobType}`, {
+      method: "POST",
+    });
+  }
+
+  /**
+   * Create a property and enqueue enrichment job.
+   * Returns immediately with property ID and job ID for polling.
+   */
+  async enqueuePropertyJob(params: EnqueuePropertyRequest): Promise<EnqueuePropertyResponse> {
+    return this.fetch("/api/jobs/enqueue-property", {
+      method: "POST",
+      body: JSON.stringify(params),
+    });
+  }
+}
+
+// Job types
+export interface Job {
+  id: string;
+  job_type: string;
+  payload: Record<string, unknown>;
+  priority: number;
+  status: "pending" | "running" | "completed" | "failed" | "cancelled";
+  progress: number;
+  message?: string;
+  error?: string;
+  result?: Record<string, unknown>;
+  created_at: string;
+  started_at?: string;
+  completed_at?: string;
+  attempts: number;
+  max_attempts: number;
+}
+
+export interface JobStats {
+  pending: number;
+  running: number;
+  completed: number;
+  failed: number;
+  total: number;
+}
+
+// Property enrichment job request/response
+export interface EnqueuePropertyRequest {
+  address: string;
+  city: string;
+  state: string;
+  zip_code?: string;
+  latitude?: number;
+  longitude?: number;
+  list_price: number;
+  bedrooms?: number;
+  bathrooms?: number;
+  sqft?: number;
+  property_type?: string;
+  source?: string;
+  source_url?: string;
+  photos?: string[];
+  down_payment_pct?: number;
+  interest_rate?: number;
+}
+
+export interface EnqueuePropertyResponse {
+  property_id: string;
+  job_id: string;
+  status: string;
+  message: string;
 }
 
 // Walk Score response
