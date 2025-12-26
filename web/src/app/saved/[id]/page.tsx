@@ -83,7 +83,7 @@ export default function SavedPropertyDetailPage({
 
   // Action states
   const [locationLoading, setLocationLoading] = useState(false);
-  const [reanalyzing, setReanalyzing] = useState(false);
+  const [reenriching, setReenriching] = useState(false);
   const [savingScenario, setSavingScenario] = useState(false);
 
   // Notes editing
@@ -402,18 +402,18 @@ export default function SavedPropertyDetailPage({
     }
   };
 
-  const handleReanalyze = async () => {
+  const handleReenrich = async () => {
     if (!savedProperty) return;
     try {
-      setReanalyzing(true);
-      const updated = await api.reanalyzeProperty(savedProperty.id);
+      setReenriching(true);
+      const updated = await api.reenrichProperty(savedProperty.id);
       setSavedProperty(updated);
       const newAnalysis = await api.getSavedPropertyAnalysis(savedProperty.id).catch(() => null);
       setAnalysis(newAnalysis);
     } catch (err) {
-      console.error("Failed to reanalyze property:", err);
+      console.error("Failed to re-enrich property:", err);
     } finally {
-      setReanalyzing(false);
+      setReenriching(false);
     }
   };
 
@@ -517,6 +517,23 @@ export default function SavedPropertyDetailPage({
           </div>
           <div className="flex items-center gap-2">
             <button
+              onClick={handleReenrich}
+              disabled={reenriching}
+              className="btn-outline text-sm flex items-center gap-1"
+            >
+              {reenriching ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Re-enriching...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="h-4 w-4" />
+                  Re-enrich
+                </>
+              )}
+            </button>
+            <button
               onClick={handleToggleFavorite}
               className={cn(
                 "btn-outline text-sm flex items-center gap-1",
@@ -585,24 +602,6 @@ export default function SavedPropertyDetailPage({
                   ) : null}
                 </div>
               </div>
-
-              <button
-                onClick={handleReanalyze}
-                disabled={reanalyzing}
-                className="btn-outline w-full flex items-center justify-center gap-2"
-              >
-                {reanalyzing ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Re-analyzing...
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className="h-4 w-4" />
-                    Re-analyze with Current Rates
-                  </>
-                )}
-              </button>
             </div>
           </div>
 

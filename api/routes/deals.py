@@ -14,6 +14,7 @@ from api.models import (
     DealScore as DealScoreModel,
     MarketDetail,
     SearchParams,
+    SensitivityResult as SensitivityResultModel,
 )
 from src.agents.pipeline import PipelineAgent
 from src.agents.deal_analyzer import DealAnalyzerAgent
@@ -151,6 +152,119 @@ def _score_to_model(score) -> Optional[DealScoreModel]:
         percentile=score.percentile,
         strategy_scores=score.strategy_scores,
     )
+
+
+def _sensitivity_to_model(deal: Deal) -> Optional[SensitivityResultModel]:
+    """Convert sensitivity analysis to API model."""
+    if not deal.sensitivity:
+        return None
+
+    s = deal.sensitivity
+    return SensitivityResultModel(
+        base_cash_flow=s.base_cash_flow,
+        base_coc=s.base_coc,
+        base_cap_rate=s.base_cap_rate,
+        rate_increase_1pct=s.rate_increase_1pct_cash_flow,
+        rate_increase_2pct=s.rate_increase_2pct_cash_flow,
+        break_even_rate=s.break_even_rate,
+        vacancy_10pct=s.vacancy_10pct_cash_flow,
+        vacancy_15pct=s.vacancy_15pct_cash_flow,
+        break_even_vacancy=s.break_even_vacancy,
+        rent_decrease_5pct=s.rent_decrease_5pct_cash_flow,
+        rent_decrease_10pct=s.rent_decrease_10pct_cash_flow,
+        break_even_rent=s.break_even_rent,
+        moderate_stress=s.moderate_stress_cash_flow,
+        severe_stress=s.severe_stress_cash_flow,
+        survives_moderate=s.survives_moderate_stress,
+        survives_severe=s.survives_severe_stress,
+        risk_rating=s.risk_rating,
+    )
+
+
+def _generate_verdict(deal: Deal) -> Optional[str]:
+    """Generate a verdict for the deal based on financial metrics and sensitivity."""
+    fm = deal.financial_metrics
+    sensitivity = deal.sensitivity
+
+    if not fm:
+        return None
+
+    if fm.monthly_cash_flow < 0:
+        return "NOT RECOMMENDED - Negative cash flow"
+
+    if sensitivity and sensitivity.risk_rating == "high":
+        return "CAUTION - High risk, does not survive stress tests"
+
+    if fm.cash_on_cash_return >= 0.10 and sensitivity and sensitivity.risk_rating == "low":
+        return "STRONG BUY - Excellent returns with low risk"
+
+    if fm.cash_on_cash_return >= 0.08 and sensitivity and sensitivity.survives_moderate_stress:
+        return "BUY - Good returns, survives moderate stress"
+
+    if fm.cash_on_cash_return >= 0.06:
+        return "CONSIDER - Acceptable returns, review carefully"
+
+    return "MARGINAL - Below target returns"
+
+
+def _generate_recommendations(deal: Deal) -> list[str]:
+    """Generate actionable recommendations for the deal."""
+    recommendations = []
+    fm = deal.financial_metrics
+    sensitivity = deal.sensitivity
+
+    if not fm:
+        return recommendations
+
+    # Cash flow recommendations
+    if fm.monthly_cash_flow < 100:
+        recommendations.append(
+            f"Cash flow is tight at ${fm.monthly_cash_flow:.0f}/month. "
+            "Consider negotiating a lower price or finding higher rent potential."
+        )
+
+    # Sensitivity recommendations
+    if sensitivity and not sensitivity.survives_moderate_stress:
+        recommendations.append(
+            "Deal is sensitive to market changes. Consider stress testing "
+            "with higher reserves or negotiating better terms."
+        )
+
+    # Rent-to-price
+    if fm.rent_to_price_ratio < 0.7:
+        recommendations.append(
+            f"Rent-to-price ratio of {fm.rent_to_price_ratio:.2f}% is below "
+            "the 1% rule. Look for value-add opportunities to increase rent."
+        )
+
+    # Break-even
+    if fm.break_even_occupancy > 0.85:
+        recommendations.append(
+            f"Break-even occupancy of {fm.break_even_occupancy:.0%} is high. "
+            "Little margin for extended vacancies."
+        )
+
+    # DSCR
+    if fm.debt_service_coverage_ratio and fm.debt_service_coverage_ratio < 1.2:
+        recommendations.append(
+            f"DSCR of {fm.debt_service_coverage_ratio:.2f} is below lender "
+            "requirements (typically 1.2-1.25). May have financing challenges."
+        )
+
+    # Positive recommendations
+    if fm.cash_on_cash_return >= 0.10:
+        recommendations.append(
+            f"Excellent cash-on-cash return of {fm.cash_on_cash_return:.1%}. "
+            "This deal exceeds typical investor targets."
+        )
+
+    if sensitivity and sensitivity.survives_severe_stress:
+        recommendations.append(
+            "Strong deal that survives severe stress testing. "
+            "Good protection against market downturns."
+        )
+
+    return recommendations
 
 
 def _deal_to_summary(deal: Deal) -> DealSummary:
@@ -334,9 +448,12 @@ async def get_deal(deal_id: str):
         property=_property_to_detail(deal.property),
         score=_score_to_model(deal.score),
         financials=_financials_to_detail(deal),
+        sensitivity=_sensitivity_to_model(deal),
         market=market_detail,
         pipeline_status=deal.pipeline_status.value,
         strategy=deal.strategy.value if deal.strategy else None,
+        verdict=_generate_verdict(deal),
+        recommendations=_generate_recommendations(deal),
         pros=deal.pros,
         cons=deal.cons,
         red_flags=deal.red_flags,

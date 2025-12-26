@@ -576,6 +576,35 @@ class SQLiteRepository(DealRepository):
         self.session.commit()
         return deleted
 
+    def fail_stuck_jobs(self, timeout_minutes: int = 10) -> int:
+        """Mark jobs stuck in 'running' state as failed after timeout.
+
+        Args:
+            timeout_minutes: Jobs running longer than this are considered stuck
+
+        Returns:
+            Number of jobs marked as failed
+        """
+        from datetime import timezone
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=timeout_minutes)
+
+        stuck_jobs = (
+            self.session.query(JobDB)
+            .filter(
+                JobDB.status == 'running',
+                JobDB.started_at < cutoff
+            )
+            .all()
+        )
+
+        for job in stuck_jobs:
+            job.status = 'failed'
+            job.error = f"Job timed out after {timeout_minutes} minutes"
+            job.completed_at = datetime.now(timezone.utc)
+
+        self.session.commit()
+        return len(stuck_jobs)
+
     def get_job_stats(self) -> dict:
         """Get job queue statistics."""
         pending = self.session.query(JobDB).filter_by(status='pending').count()

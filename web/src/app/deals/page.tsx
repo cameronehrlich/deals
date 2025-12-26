@@ -10,6 +10,12 @@ import {
   TrendingUp,
   ArrowUpDown,
   ChevronDown,
+  Play,
+  CheckCircle,
+  Loader2,
+  AlertCircle,
+  Bookmark,
+  Check,
 } from "lucide-react";
 import { ImageCarousel } from "@/components/ImageCarousel";
 import { api, PropertyListing, ApiUsage } from "@/lib/api";
@@ -147,23 +153,49 @@ const MAX_RESULTS = 42; // API free tier max
 function LivePropertyCard({
   property,
   onAnalyze,
+  isSelected,
+  onToggleSelect,
+  isSaved,
 }: {
   property: PropertyListing;
   onAnalyze: () => void;
+  isSelected: boolean;
+  onToggleSelect: () => void;
+  isSaved: boolean;
 }) {
   return (
-    <div className="card hover:shadow-lg transition-shadow">
+    <div className={cn(
+      "card hover:shadow-lg transition-shadow",
+      isSelected && "ring-2 ring-primary-500"
+    )}>
       {/* Photo Carousel */}
       <div className="relative h-48 -mx-4 -mt-4 mb-4 bg-gray-100 rounded-t-lg overflow-hidden">
         <ImageCarousel
           images={property.photos || []}
           alt={property.address}
         />
-        {/* Live badge */}
-        <div className="absolute top-2 left-2 px-2 py-1 bg-green-500 text-white text-xs font-medium rounded-full flex items-center gap-1 z-10">
-          <Radio className="h-3 w-3" />
-          Live
-        </div>
+        {/* Selection checkbox */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleSelect();
+          }}
+          className={cn(
+            "absolute top-2 left-2 w-6 h-6 rounded border-2 flex items-center justify-center z-10 transition-colors",
+            isSelected
+              ? "bg-primary-600 border-primary-600 text-white"
+              : "bg-white/90 border-gray-300 hover:border-primary-400"
+          )}
+        >
+          {isSelected && <Check className="h-4 w-4" />}
+        </button>
+        {/* Saved indicator */}
+        {isSaved && (
+          <div className="absolute top-2 right-2 px-2 py-1 bg-primary-600 text-white text-xs font-medium rounded-full flex items-center gap-1 z-10">
+            <Bookmark className="h-3 w-3 fill-current" />
+            Saved
+          </div>
+        )}
       </div>
 
       {/* Content */}
@@ -252,6 +284,22 @@ function DealsContent() {
   const [searching, setSearching] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Bulk analyze state
+  const [analyzingAll, setAnalyzingAll] = useState(false);
+  const [analyzeProgress, setAnalyzeProgress] = useState<{
+    total: number;
+    processed: number;
+    newJobs: number;
+    alreadyAnalyzed: number;
+    inProgress: number;
+    errors: number;
+  } | null>(null);
+  const [analyzedInSession, setAnalyzedInSession] = useState<Set<string>>(new Set());
+
+  // Selection state
+  const [selectedPropertyIds, setSelectedPropertyIds] = useState<Set<string>>(new Set());
+  const [savedPropertyIds, setSavedPropertyIds] = useState<Set<string>>(new Set());
 
   // Markets dropdown
   const [availableMarkets, setAvailableMarkets] = useState<string[]>(DEFAULT_MARKETS);
@@ -428,6 +476,137 @@ function DealsContent() {
     }
   };
 
+  // Check if a property is saved
+  const isPropertySaved = useCallback((property: PropertyListing) => {
+    // Check by property_id
+    if (savedPropertyIds.has(property.property_id)) return true;
+    // Check by address-based key
+    const key = `${property.address}|${property.city}|${property.state}`.toLowerCase();
+    return savedPropertyIds.has(key);
+  }, [savedPropertyIds]);
+
+  // Toggle property selection
+  const togglePropertySelection = useCallback((propertyId: string) => {
+    setSelectedPropertyIds(prev => {
+      const next = new Set(prev);
+      if (next.has(propertyId)) {
+        next.delete(propertyId);
+      } else {
+        next.add(propertyId);
+      }
+      return next;
+    });
+  }, []);
+
+  // Clear selection
+  const clearSelection = useCallback(() => {
+    setSelectedPropertyIds(new Set());
+  }, []);
+
+  // Analyze all visible properties (or selected ones) in bulk
+  const handleAnalyzeAll = async () => {
+    if (analyzingAll) return;
+
+    // If properties are selected, only analyze those; otherwise analyze all
+    const baseProperties = selectedPropertyIds.size > 0
+      ? displayedProperties.filter(p => selectedPropertyIds.has(p.property_id))
+      : displayedProperties;
+
+    // Get properties to analyze - only those not already processed in this session
+    const propertiesToAnalyze = baseProperties.filter(
+      p => !analyzedInSession.has(p.property_id)
+    );
+
+    if (propertiesToAnalyze.length === 0) {
+      setAnalyzeProgress({
+        total: displayedProperties.length,
+        processed: displayedProperties.length,
+        newJobs: 0,
+        alreadyAnalyzed: displayedProperties.length,
+        inProgress: 0,
+        errors: 0,
+      });
+      return;
+    }
+
+    setAnalyzingAll(true);
+    setAnalyzeProgress({
+      total: propertiesToAnalyze.length,
+      processed: 0,
+      newJobs: 0,
+      alreadyAnalyzed: 0,
+      inProgress: 0,
+      errors: 0,
+    });
+
+    let newJobs = 0;
+    let alreadyAnalyzed = 0;
+    let inProgress = 0;
+    let errors = 0;
+    const newlyAnalyzed = new Set<string>();
+
+    // Process properties sequentially to avoid rate limiting
+    for (let i = 0; i < propertiesToAnalyze.length; i++) {
+      const property = propertiesToAnalyze[i];
+
+      try {
+        const response = await api.enqueuePropertyJob({
+          address: property.address,
+          city: property.city,
+          state: property.state,
+          zip_code: property.zip_code,
+          latitude: property.latitude,
+          longitude: property.longitude,
+          list_price: property.price,
+          bedrooms: property.bedrooms,
+          bathrooms: property.bathrooms,
+          sqft: property.sqft || undefined,
+          property_type: property.property_type,
+          source: property.source,
+          source_url: property.source_url,
+          photos: property.photos,
+        });
+
+        // Track by response status
+        if (response.status === "already_analyzed") {
+          alreadyAnalyzed++;
+        } else if (response.status === "running" || response.status === "pending") {
+          // Check if it's a new job we just created or an existing one
+          if (response.job_id) {
+            inProgress++;
+          }
+          newJobs++;
+        }
+
+        newlyAnalyzed.add(property.property_id);
+      } catch (err) {
+        console.error(`Failed to enqueue property ${property.address}:`, err);
+        errors++;
+      }
+
+      // Update progress
+      setAnalyzeProgress({
+        total: propertiesToAnalyze.length,
+        processed: i + 1,
+        newJobs,
+        alreadyAnalyzed,
+        inProgress,
+        errors,
+      });
+    }
+
+    // Update session tracking
+    setAnalyzedInSession(prev => {
+      const updated = new Set(prev);
+      newlyAnalyzed.forEach(id => updated.add(id));
+      return updated;
+    });
+
+    // Clear selection after analyzing
+    clearSelection();
+    setAnalyzingAll(false);
+  };
+
   // Load favorite markets for dropdown
   useEffect(() => {
     async function loadMarkets() {
@@ -446,6 +625,28 @@ function DealsContent() {
       }
     }
     loadMarkets();
+  }, []);
+
+  // Load saved property IDs to show "Saved" indicators
+  useEffect(() => {
+    async function loadSavedPropertyIds() {
+      try {
+        const savedProperties = await api.getSavedProperties();
+        // Create a set of identifiers we can match against
+        // Match by address + city + state since property_id formats differ
+        const savedSet = new Set<string>();
+        savedProperties.forEach(p => {
+          // Add the property ID directly
+          if (p.id) savedSet.add(p.id);
+          // Also add address-based key for matching
+          savedSet.add(`${p.address}|${p.city}|${p.state}`.toLowerCase());
+        });
+        setSavedPropertyIds(savedSet);
+      } catch (err) {
+        console.error("Failed to load saved properties:", err);
+      }
+    }
+    loadSavedPropertyIds();
   }, []);
 
   // Try to restore state from sessionStorage on mount
@@ -647,34 +848,114 @@ function DealsContent() {
             </div>
           ) : (
             <div className="space-y-4 animate-fade-in">
-              {/* Results Header with Sort */}
+              {/* Results Header with Sort and Analyze */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <p className="text-sm text-gray-500">
-                    Showing {displayedProperties.length} of {allProperties.length} properties in {selectedLocation}
+                    {selectedPropertyIds.size > 0 ? (
+                      <>
+                        {selectedPropertyIds.size} selected of {displayedProperties.length} properties
+                        <button
+                          onClick={clearSelection}
+                          className="ml-2 text-primary-600 hover:text-primary-700 underline"
+                        >
+                          Clear
+                        </button>
+                      </>
+                    ) : (
+                      <>Showing {displayedProperties.length} of {allProperties.length} properties in {selectedLocation}</>
+                    )}
                   </p>
-                  <div className="flex items-center gap-2 text-xs text-green-600">
-                    <Radio className="h-3 w-3" />
-                    <span>Live</span>
-                  </div>
                 </div>
 
-                {/* Sort Dropdown */}
-                <div className="flex items-center gap-2">
-                  <ArrowUpDown className="h-4 w-4 text-gray-400" />
-                  <select
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value)}
-                    className="text-sm border border-gray-200 rounded-md px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                {/* Sort and Analyze */}
+                <div className="flex items-center gap-3">
+                  {/* Sort Dropdown */}
+                  <div className="flex items-center gap-2">
+                    <ArrowUpDown className="h-4 w-4 text-gray-400" />
+                    <select
+                      value={sortBy}
+                      onChange={(e) => setSortBy(e.target.value)}
+                      className="text-sm border border-gray-200 rounded-md px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    >
+                      {SORT_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Analyze Button */}
+                  <button
+                    onClick={handleAnalyzeAll}
+                    disabled={analyzingAll || displayedProperties.length === 0}
+                    className={cn(
+                      "flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-md transition-colors",
+                      analyzingAll
+                        ? "bg-gray-100 text-gray-500 cursor-not-allowed"
+                        : "bg-primary-600 text-white hover:bg-primary-700"
+                    )}
                   >
-                    {SORT_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                    {analyzingAll ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Analyzing {analyzeProgress?.processed}/{analyzeProgress?.total}...
+                      </>
+                    ) : selectedPropertyIds.size > 0 ? (
+                      <>
+                        <Play className="h-4 w-4" />
+                        Analyze Selected ({selectedPropertyIds.size})
+                      </>
+                    ) : (
+                      <>
+                        <Play className="h-4 w-4" />
+                        Analyze All ({displayedProperties.length})
+                      </>
+                    )}
+                  </button>
                 </div>
               </div>
+
+              {/* Analyze Progress/Results Banner */}
+              {analyzeProgress && !analyzingAll && analyzeProgress.processed > 0 && (
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <CheckCircle className="h-5 w-5 text-green-500" />
+                      <div className="flex items-center gap-3 text-sm">
+                        {analyzeProgress.newJobs > 0 && (
+                          <span className="text-primary-600 font-medium">
+                            {analyzeProgress.newJobs} queued for analysis
+                          </span>
+                        )}
+                        {analyzeProgress.alreadyAnalyzed > 0 && (
+                          <span className="text-gray-500">
+                            {analyzeProgress.alreadyAnalyzed} already analyzed
+                          </span>
+                        )}
+                        {analyzeProgress.errors > 0 && (
+                          <span className="text-red-500 flex items-center gap-1">
+                            <AlertCircle className="h-4 w-4" />
+                            {analyzeProgress.errors} failed
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setAnalyzeProgress(null)}
+                      className="text-gray-400 hover:text-gray-600 text-sm"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                  {analyzeProgress.newJobs > 0 && (
+                    <p className="mt-2 text-xs text-gray-500">
+                      Jobs are processing in the background. Visit Saved Properties to see analyzed results.
+                    </p>
+                  )}
+                </div>
+              )}
 
               {/* Property Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -687,6 +968,9 @@ function DealsContent() {
                     <LivePropertyCard
                       property={property}
                       onAnalyze={() => handleAnalyze(property)}
+                      isSelected={selectedPropertyIds.has(property.property_id)}
+                      onToggleSelect={() => togglePropertySelection(property.property_id)}
+                      isSaved={isPropertySaved(property)}
                     />
                   </div>
                 ))}

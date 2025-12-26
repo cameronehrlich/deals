@@ -23,7 +23,7 @@ function formatDate(dateStr: string | null): string {
   return date.toLocaleString();
 }
 
-function formatDuration(startStr: string | null, endStr: string | null): string {
+function formatDuration(startStr: string | null | undefined, endStr: string | null | undefined): string {
   if (!startStr) return "-";
   const start = new Date(startStr);
   const end = endStr ? new Date(endStr) : new Date();
@@ -326,7 +326,7 @@ export default function AdminJobsPage() {
                     {job.job_type.replace("_", " ")}
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-600">
-                    {job.payload.market_id || job.payload.property_id || "-"}
+                    {String(job.payload.market_id || job.payload.property_id || "-")}
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-600 max-w-xs truncate">
                     {job.error || job.message || "-"}

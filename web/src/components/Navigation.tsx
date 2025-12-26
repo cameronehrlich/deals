@@ -6,7 +6,6 @@ import {
   Home,
   MapPin,
   Search,
-  Calculator,
   Building2,
   BarChart3,
   Bookmark,
@@ -20,7 +19,6 @@ const navigation = [
   { name: "Find Deals", href: "/deals", icon: Search },
   { name: "Saved", href: "/saved", icon: Bookmark },
   { name: "Analyze", href: "/import", icon: BarChart3 },
-  { name: "Calculator", href: "/calculator", icon: Calculator },
 ];
 
 export function Navigation() {

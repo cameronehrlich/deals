@@ -54,6 +54,18 @@ export default function DealDetailPage() {
   const [locationInsightsLoading, setLocationInsightsLoading] = useState(false);
   const [floodZone, setFloodZone] = useState<FloodZoneResponse | null>(null);
   const [floodZoneLoading, setFloodZoneLoading] = useState(false);
+  const [incomeData, setIncomeData] = useState<{
+    zip_code: string;
+    median_income: number;
+    income_tier: string;
+    monthly_income: number;
+    monthly_rent: number;
+    rent_to_income_pct: number;
+    affordable_rent: number;
+    is_affordable: boolean;
+    affordability_rating: string;
+  } | null>(null);
+  const [incomeLoading, setIncomeLoading] = useState(false);
 
   useEffect(() => {
     async function fetchDeal() {
@@ -145,6 +157,30 @@ export default function DealDetailPage() {
 
     if (deal?.property) {
       fetchFloodZone();
+    }
+  }, [deal]);
+
+  // Fetch Income Affordability when we have property zip code and rent
+  useEffect(() => {
+    async function fetchIncomeAffordability() {
+      if (!deal?.property?.zip_code || !deal?.property?.estimated_rent) return;
+
+      try {
+        setIncomeLoading(true);
+        const data = await api.getIncomeAffordability(
+          deal.property.zip_code,
+          deal.property.estimated_rent
+        );
+        setIncomeData(data);
+      } catch (err) {
+        console.error("Failed to fetch income affordability:", err);
+      } finally {
+        setIncomeLoading(false);
+      }
+    }
+
+    if (deal?.property) {
+      fetchIncomeAffordability();
     }
   }, [deal]);
 
@@ -247,6 +283,43 @@ export default function DealDetailPage() {
             <p className="text-center text-sm text-gray-500 mt-4">
               Ranked #{score.rank} • Top {score.percentile?.toFixed(0)}%
             </p>
+          )}
+        </div>
+      )}
+
+      {/* Verdict & Recommendations */}
+      {(deal.verdict || (deal.recommendations && deal.recommendations.length > 0)) && (
+        <div className="card border-l-4 border-l-primary-500">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">
+            Investment Verdict
+          </h2>
+          {deal.verdict && (
+            <div className="mb-4">
+              <span className={cn(
+                "inline-flex items-center px-3 py-1 rounded-full text-sm font-medium",
+                deal.verdict.includes("STRONG BUY") ? "bg-green-100 text-green-800" :
+                deal.verdict.includes("BUY") ? "bg-green-50 text-green-700" :
+                deal.verdict.includes("CONSIDER") ? "bg-yellow-100 text-yellow-800" :
+                deal.verdict.includes("CAUTION") ? "bg-orange-100 text-orange-800" :
+                deal.verdict.includes("NOT RECOMMENDED") ? "bg-red-100 text-red-800" :
+                "bg-gray-100 text-gray-800"
+              )}>
+                {deal.verdict}
+              </span>
+            </div>
+          )}
+          {deal.recommendations && deal.recommendations.length > 0 && (
+            <div>
+              <h4 className="text-sm font-medium text-gray-700 mb-2">Recommendations</h4>
+              <ul className="space-y-2">
+                {deal.recommendations.map((rec: string, i: number) => (
+                  <li key={i} className="text-sm text-gray-600 flex items-start gap-2">
+                    <TrendingUp className="h-4 w-4 text-primary-500 mt-0.5 flex-shrink-0" />
+                    {rec}
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
         </div>
       )}
@@ -444,6 +517,158 @@ export default function DealDetailPage() {
         </div>
       )}
 
+      {/* Stress Test Analysis */}
+      {deal.sensitivity && (
+        <div className="card">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">
+            Stress Test Analysis
+          </h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b">
+                  <th className="text-left py-2 px-3 font-medium text-gray-700">Scenario</th>
+                  <th className="text-right py-2 px-3 font-medium text-gray-700">Monthly Cash Flow</th>
+                  <th className="text-right py-2 px-3 font-medium text-gray-700">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                <tr>
+                  <td className="py-2 px-3 text-gray-600">Base Case</td>
+                  <td className={cn("text-right py-2 px-3 font-medium", getCashFlowColor(deal.sensitivity.base_cash_flow))}>
+                    {formatCurrency(deal.sensitivity.base_cash_flow)}
+                  </td>
+                  <td className="text-right py-2 px-3">
+                    <span className={deal.sensitivity.base_cash_flow >= 0 ? "text-green-600" : "text-red-600"}>
+                      {deal.sensitivity.base_cash_flow >= 0 ? "OK" : "Negative"}
+                    </span>
+                  </td>
+                </tr>
+                <tr>
+                  <td className="py-2 px-3 text-gray-600">Interest Rate +1%</td>
+                  <td className={cn("text-right py-2 px-3 font-medium", getCashFlowColor(deal.sensitivity.rate_increase_1pct))}>
+                    {formatCurrency(deal.sensitivity.rate_increase_1pct)}
+                  </td>
+                  <td className="text-right py-2 px-3">
+                    <span className={deal.sensitivity.rate_increase_1pct >= 0 ? "text-green-600" : "text-red-600"}>
+                      {deal.sensitivity.rate_increase_1pct >= 0 ? "OK" : "Negative"}
+                    </span>
+                  </td>
+                </tr>
+                <tr>
+                  <td className="py-2 px-3 text-gray-600">Interest Rate +2%</td>
+                  <td className={cn("text-right py-2 px-3 font-medium", getCashFlowColor(deal.sensitivity.rate_increase_2pct))}>
+                    {formatCurrency(deal.sensitivity.rate_increase_2pct)}
+                  </td>
+                  <td className="text-right py-2 px-3">
+                    <span className={deal.sensitivity.rate_increase_2pct >= 0 ? "text-green-600" : "text-red-600"}>
+                      {deal.sensitivity.rate_increase_2pct >= 0 ? "OK" : "Negative"}
+                    </span>
+                  </td>
+                </tr>
+                <tr>
+                  <td className="py-2 px-3 text-gray-600">Vacancy 10%</td>
+                  <td className={cn("text-right py-2 px-3 font-medium", getCashFlowColor(deal.sensitivity.vacancy_10pct))}>
+                    {formatCurrency(deal.sensitivity.vacancy_10pct)}
+                  </td>
+                  <td className="text-right py-2 px-3">
+                    <span className={deal.sensitivity.vacancy_10pct >= 0 ? "text-green-600" : "text-red-600"}>
+                      {deal.sensitivity.vacancy_10pct >= 0 ? "OK" : "Negative"}
+                    </span>
+                  </td>
+                </tr>
+                <tr>
+                  <td className="py-2 px-3 text-gray-600">Vacancy 15%</td>
+                  <td className={cn("text-right py-2 px-3 font-medium", getCashFlowColor(deal.sensitivity.vacancy_15pct))}>
+                    {formatCurrency(deal.sensitivity.vacancy_15pct)}
+                  </td>
+                  <td className="text-right py-2 px-3">
+                    <span className={deal.sensitivity.vacancy_15pct >= 0 ? "text-green-600" : "text-red-600"}>
+                      {deal.sensitivity.vacancy_15pct >= 0 ? "OK" : "Negative"}
+                    </span>
+                  </td>
+                </tr>
+                <tr>
+                  <td className="py-2 px-3 text-gray-600">Rent -5%</td>
+                  <td className={cn("text-right py-2 px-3 font-medium", getCashFlowColor(deal.sensitivity.rent_decrease_5pct))}>
+                    {formatCurrency(deal.sensitivity.rent_decrease_5pct)}
+                  </td>
+                  <td className="text-right py-2 px-3">
+                    <span className={deal.sensitivity.rent_decrease_5pct >= 0 ? "text-green-600" : "text-red-600"}>
+                      {deal.sensitivity.rent_decrease_5pct >= 0 ? "OK" : "Negative"}
+                    </span>
+                  </td>
+                </tr>
+                <tr className="bg-yellow-50">
+                  <td className="py-2 px-3 text-gray-700 font-medium">Moderate Stress</td>
+                  <td className={cn("text-right py-2 px-3 font-medium", getCashFlowColor(deal.sensitivity.moderate_stress))}>
+                    {formatCurrency(deal.sensitivity.moderate_stress)}
+                  </td>
+                  <td className="text-right py-2 px-3">
+                    <span className={deal.sensitivity.survives_moderate ? "text-green-600 font-medium" : "text-red-600 font-medium"}>
+                      {deal.sensitivity.survives_moderate ? "Survives" : "Fails"}
+                    </span>
+                  </td>
+                </tr>
+                <tr className="bg-red-50">
+                  <td className="py-2 px-3 text-gray-700 font-medium">Severe Stress</td>
+                  <td className={cn("text-right py-2 px-3 font-medium", getCashFlowColor(deal.sensitivity.severe_stress))}>
+                    {formatCurrency(deal.sensitivity.severe_stress)}
+                  </td>
+                  <td className="text-right py-2 px-3">
+                    <span className={deal.sensitivity.survives_severe ? "text-green-600 font-medium" : "text-red-600 font-medium"}>
+                      {deal.sensitivity.survives_severe ? "Survives" : "Fails"}
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          {/* Risk Rating and Break-Even Points */}
+          <div className="mt-6 pt-4 border-t">
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-gray-700 font-medium">Risk Rating</span>
+              <span className={cn(
+                "px-3 py-1 rounded-full text-sm font-medium",
+                deal.sensitivity.risk_rating === "low" ? "bg-green-100 text-green-800" :
+                deal.sensitivity.risk_rating === "medium" ? "bg-yellow-100 text-yellow-800" :
+                "bg-red-100 text-red-800"
+              )}>
+                {deal.sensitivity.risk_rating.charAt(0).toUpperCase() + deal.sensitivity.risk_rating.slice(1)} Risk
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {deal.sensitivity.break_even_rate && (
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <p className="text-sm text-gray-500">Break-even Rate</p>
+                  <p className="text-lg font-semibold text-gray-900">
+                    {formatPercent(deal.sensitivity.break_even_rate)}
+                  </p>
+                </div>
+              )}
+              {deal.sensitivity.break_even_vacancy && (
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <p className="text-sm text-gray-500">Break-even Vacancy</p>
+                  <p className="text-lg font-semibold text-gray-900">
+                    {formatPercent(deal.sensitivity.break_even_vacancy)}
+                  </p>
+                </div>
+              )}
+              {deal.sensitivity.break_even_rent && (
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <p className="text-sm text-gray-500">Break-even Rent</p>
+                  <p className="text-lg font-semibold text-gray-900">
+                    {formatCurrency(deal.sensitivity.break_even_rent)}/mo
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Pros, Cons, Red Flags */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {deal.pros && deal.pros.length > 0 && (
@@ -529,6 +754,74 @@ export default function DealDetailPage() {
           >
             View full market analysis →
           </Link>
+        </div>
+      )}
+
+      {/* Tenant Affordability */}
+      {(incomeData || incomeLoading) && (
+        <div className="card">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            <DollarSign className="h-5 w-5" />
+            Tenant Affordability Analysis
+          </h3>
+          {incomeLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600"></div>
+              <span className="ml-2 text-gray-500">Loading income data...</span>
+            </div>
+          ) : incomeData ? (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div>
+                  <p className="text-sm text-gray-500">Median Income</p>
+                  <p className="font-semibold">{formatCurrency(incomeData.median_income)}/yr</p>
+                  <span className={cn(
+                    "text-xs px-2 py-0.5 rounded",
+                    incomeData.income_tier === "high" ? "bg-green-100 text-green-700" :
+                    incomeData.income_tier === "middle" ? "bg-blue-100 text-blue-700" :
+                    incomeData.income_tier === "low-middle" ? "bg-yellow-100 text-yellow-700" :
+                    "bg-gray-100 text-gray-700"
+                  )}>
+                    {incomeData.income_tier} income area
+                  </span>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">Monthly Income</p>
+                  <p className="font-semibold">{formatCurrency(incomeData.monthly_income)}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">Rent-to-Income</p>
+                  <p className={cn(
+                    "font-semibold",
+                    incomeData.rent_to_income_pct <= 25 ? "text-green-600" :
+                    incomeData.rent_to_income_pct <= 30 ? "text-blue-600" :
+                    incomeData.rent_to_income_pct <= 40 ? "text-yellow-600" :
+                    "text-red-600"
+                  )}>
+                    {incomeData.rent_to_income_pct.toFixed(1)}%
+                  </p>
+                  <span className="text-xs text-gray-500">of median income</span>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">30% Affordable Rent</p>
+                  <p className="font-semibold">{formatCurrency(incomeData.affordable_rent)}/mo</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 pt-2 border-t">
+                <span className={cn(
+                  "px-3 py-1 rounded-full text-sm font-medium",
+                  incomeData.is_affordable ? "bg-green-100 text-green-800" : "bg-orange-100 text-orange-800"
+                )}>
+                  {incomeData.is_affordable ? "Affordable" : "Above Guideline"}
+                </span>
+                <span className="text-sm text-gray-600">
+                  {incomeData.is_affordable
+                    ? "Tenants at median income can comfortably afford this rent"
+                    : "May need to target higher-income tenants or expect longer vacancy periods"}
+                </span>
+              </div>
+            </div>
+          ) : null}
         </div>
       )}
 

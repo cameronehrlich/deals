@@ -378,6 +378,11 @@ async def process_pending_jobs(limit: int = Query(10, ge=1, le=50)):
 
     repo = get_repository()
 
+    # Clean up any stuck jobs before processing new ones
+    stuck_failed = repo.fail_stuck_jobs(timeout_minutes=10)
+    if stuck_failed > 0:
+        print(f"[Jobs] Marked {stuck_failed} stuck job(s) as failed")
+
     for _ in range(limit):
         job = repo.get_pending_job()
         if not job:

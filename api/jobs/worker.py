@@ -23,10 +23,18 @@ class JobWorker:
         python -m api.jobs.worker
     """
 
-    def __init__(self, poll_interval: float = 2.0):
+    def __init__(self, poll_interval: float = 2.0, stuck_timeout_minutes: int = 10):
         self.poll_interval = poll_interval
+        self.stuck_timeout_minutes = stuck_timeout_minutes
         self.running = False
         self._current_job: Optional[JobDB] = None
+
+    def _cleanup_stuck_jobs(self):
+        """Check for and fail any jobs that have been running too long."""
+        repo = get_repository()
+        failed_count = repo.fail_stuck_jobs(timeout_minutes=self.stuck_timeout_minutes)
+        if failed_count > 0:
+            print(f"[Worker] Marked {failed_count} stuck job(s) as failed")
 
     async def run(self):
         """Main worker loop."""
@@ -43,6 +51,8 @@ class JobWorker:
 
         while self.running:
             try:
+                # Check for stuck jobs before processing new ones
+                self._cleanup_stuck_jobs()
                 await self.process_next_job()
             except Exception as e:
                 print(f"[Worker] Error in main loop: {e}")

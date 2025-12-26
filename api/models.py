@@ -191,9 +191,12 @@ class DealDetail(BaseModel):
     property: PropertyDetail
     score: Optional[DealScore] = None
     financials: Optional[FinancialDetail] = None
+    sensitivity: Optional["SensitivityResult"] = None
     market: Optional[MarketDetail] = None
     pipeline_status: str
     strategy: Optional[str] = None
+    verdict: Optional[str] = None
+    recommendations: list[str] = Field(default_factory=list)
     pros: list[str] = Field(default_factory=list)
     cons: list[str] = Field(default_factory=list)
     red_flags: list[str] = Field(default_factory=list)

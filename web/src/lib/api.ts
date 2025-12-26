@@ -108,6 +108,61 @@ export interface Deal {
   cons: string[];
 }
 
+export interface PropertyDetail extends Property {
+  full_address?: string;
+  year_built?: number;
+  lot_size_sqft?: number;
+  stories?: number;
+  units?: number;
+  status?: string;
+  source?: string;
+  source_url?: string;
+  annual_taxes?: number;
+  hoa_fee?: number;
+  original_price?: number;
+  price_reduction_pct?: number;
+  gross_rent_multiplier?: number;
+  features?: string[];
+}
+
+export interface FinancialsDetail extends Financials {
+  purchase_price: number;
+  down_payment: number;
+  loan_amount: number;
+  closing_costs: number;
+  monthly_mortgage: number;
+  monthly_taxes: number;
+  monthly_insurance: number;
+  monthly_hoa: number;
+  monthly_maintenance: number;
+  monthly_capex: number;
+  monthly_vacancy_reserve: number;
+  monthly_property_management: number;
+  total_monthly_expenses: number;
+  net_operating_income: number;
+  interest_rate: number;
+  down_payment_pct: number;
+}
+
+export interface DealDetail {
+  id: string;
+  property: PropertyDetail;
+  score?: DealScore;
+  financials?: FinancialsDetail;
+  sensitivity?: SensitivityResult;
+  market?: MarketDetail;
+  pipeline_status: string;
+  strategy?: string;
+  verdict?: string;
+  recommendations: string[];
+  pros: string[];
+  cons: string[];
+  red_flags: string[];
+  notes: string[];
+  first_seen: string;
+  last_analyzed?: string;
+}
+
 export interface SensitivityResult {
   base_cash_flow: number;
   base_coc: number;
@@ -503,7 +558,7 @@ class ApiClient {
     return this.fetch(`/api/deals/search?${searchParams}`);
   }
 
-  async getDeal(dealId: string): Promise<any> {
+  async getDeal(dealId: string): Promise<DealDetail> {
     return this.fetch(`/api/deals/${dealId}`);
   }
 
@@ -757,6 +812,12 @@ class ApiClient {
 
   async reanalyzeProperty(propertyId: string): Promise<SavedProperty> {
     return this.fetch(`/api/saved/properties/${propertyId}/reanalyze`, {
+      method: "POST",
+    });
+  }
+
+  async reenrichProperty(propertyId: string): Promise<SavedProperty> {
+    return this.fetch(`/api/saved/properties/${propertyId}/reenrich`, {
       method: "POST",
     });
   }

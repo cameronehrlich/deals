@@ -1,14 +1,19 @@
 """Deal model combining property, financials, and market data."""
 
+from __future__ import annotations
+
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from pydantic import BaseModel, Field
 
 from src.models.property import Property
 from src.models.financials import Financials, FinancialMetrics
 from src.models.market import Market, MarketMetrics
+
+if TYPE_CHECKING:
+    from src.analysis.sensitivity import SensitivityResult
 
 
 class DealPipeline(str, Enum):
@@ -182,6 +187,9 @@ class Deal(BaseModel):
 
     # Scoring
     score: Optional[DealScore] = None
+
+    # Sensitivity analysis
+    sensitivity: Optional[SensitivityResult] = None
 
     # Pipeline tracking
     pipeline_status: DealPipeline = Field(default=DealPipeline.NEW)

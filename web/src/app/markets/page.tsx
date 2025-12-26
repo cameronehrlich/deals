@@ -694,7 +694,7 @@ export default function MarketsPage() {
       {error && (
         <div className="card border-red-200 bg-red-50">
           <p className="text-red-700">{error}</p>
-          <button onClick={fetchMarkets} className="btn-primary mt-3">
+          <button onClick={() => fetchMarkets()} className="btn-primary mt-3">
             Retry
           </button>
         </div>

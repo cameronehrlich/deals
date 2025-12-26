@@ -134,6 +134,7 @@ class DealAnalyzerAgent(BaseAgent):
         # Run sensitivity analysis if requested
         if run_sensitivity and deal.financials:
             sensitivity = self.sensitivity_analyzer.analyze(deal)
+            deal.sensitivity = sensitivity  # Store on deal for API response
             deal.notes.append(f"Risk rating: {sensitivity.risk_rating}")
             if not sensitivity.survives_moderate_stress:
                 deal.red_flags.append("Does not survive moderate stress test")
