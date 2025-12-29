@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   Calculator,
@@ -15,9 +15,9 @@ import {
 } from "lucide-react";
 import { api, MacroDataResponse } from "@/lib/api";
 import { cn, formatCurrency, formatPercent, getCashFlowColor } from "@/lib/utils";
-import { LoadingSpinner } from "@/components/LoadingSpinner";
+import { LoadingSpinner, LoadingPage } from "@/components/LoadingSpinner";
 
-export default function CalculatorPage() {
+function CalculatorContent() {
   const searchParams = useSearchParams();
 
   // Inputs from URL or defaults
@@ -472,5 +472,13 @@ export default function CalculatorPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function CalculatorPage() {
+  return (
+    <Suspense fallback={<LoadingPage />}>
+      <CalculatorContent />
+    </Suspense>
   );
 }
