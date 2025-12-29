@@ -198,8 +198,8 @@ fly deploy
 - [x] Phase 2: Web Application (FastAPI + Next.js)
 - [x] Phase 3: Live Data Integration (US Real Estate API, income data)
 - [x] Phase 4: Persistence (SQLite, saved properties, market favorites)
-- [ ] Phase 5: Transaction Pipeline (financing, outreach, offers) ← **Next**
-- [ ] Phase 6: Enhanced Analysis (comp analysis, neighborhood scoring)
+- [x] Phase 5: Transaction Pipeline (financing, outreach, offers)
+- [ ] Phase 6: Enhanced Analysis (comp analysis, neighborhood scoring) ← **Next**
 - [ ] Phase 7: Alerts & Monitoring (new listing notifications)
 
 ---
@@ -354,6 +354,103 @@ After Phase 5, you should be able to:
 3. Generate a lender-ready deal packet in under 2 minutes
 4. Compare 3 lender quotes side-by-side and pick the best one
 5. Never lose track of a follow-up or deadline
+
+---
+
+## Phase 6: Enhanced Analysis
+
+Phase 6 adds deeper property and neighborhood analysis to help identify the best deals and avoid hidden risks.
+
+### 6.1 Comparable Sales Analysis
+
+**Goal:** Understand how a property's price compares to recent sales in the area.
+
+**What it does:**
+- Fetch recent sales (comps) within configurable radius and timeframe
+- Calculate price per square foot comparisons
+- Show how subject property compares: above/below market, % difference
+- Filter comps by similarity (beds, baths, sqft range, property type)
+- ARV (After Repair Value) estimates for value-add deals
+
+**Data Sources:**
+- US Real Estate API `/properties/sold` endpoint for recent sales
+- Calculate median/average price per sqft for the area
+- Compare subject property to comp set
+
+**UI:**
+- Comp grid showing recent sales with key metrics
+- Map view with subject property and comps
+- Price positioning indicator: "5% below comparable sales"
+
+### 6.2 Neighborhood Scoring
+
+**Goal:** Quantify neighborhood quality beyond Walk Score to identify up-and-coming areas and avoid problem locations.
+
+**What it does:**
+- **Crime Index:** Relative safety score for the area
+- **School Ratings:** Average school quality in the district
+- **Employment Access:** Proximity to major employers and job centers
+- **Appreciation Trend:** Historical price growth for the ZIP/neighborhood
+- **Rental Demand:** Vacancy rates, rent growth, days on market for rentals
+- **Demographics:** Income trends, population growth, renter vs owner ratio
+
+**Data Sources:**
+| Data | Source | Notes |
+|------|--------|-------|
+| Crime | CrimeGrade.org or AreaVibes | Free tier available |
+| Schools | GreatSchools API | Free for non-commercial |
+| Appreciation | Redfin Data Center | Already integrated |
+| Demographics | Census ACS | Already integrated |
+| Rental Demand | HUD/Census | Vacancy rates by ZIP |
+
+**Composite Score:**
+Generate a 0-100 "Neighborhood Score" combining:
+- Safety (25%)
+- Schools (20%)
+- Appreciation potential (25%)
+- Rental demand (20%)
+- Accessibility (10%)
+
+### 6.3 Investment Risk Assessment
+
+**Goal:** Flag potential red flags before you make an offer.
+
+**What it does:**
+- **Property Red Flags:** High days on market, price reductions, foreclosure history
+- **Market Red Flags:** Declining prices, rising inventory, job losses
+- **Location Red Flags:** High crime, flood zone, declining schools
+- **Financial Red Flags:** Negative cash flow scenarios, thin margins
+
+**Output:**
+- Risk score (Low/Medium/High) with specific concerns listed
+- "Deal breakers" vs "things to investigate"
+- Suggested due diligence items based on flags
+
+### Data Model Extensions
+
+| Entity | Purpose |
+|--------|---------|
+| ComparableSale | Recent sale with property details and sale price |
+| NeighborhoodMetrics | Cached scores for a ZIP/neighborhood |
+| RiskAssessment | Calculated risk factors for a property |
+
+### UI Additions
+
+| Location | Addition |
+|----------|----------|
+| `/saved/{id}` | New "Comps" tab with comparable sales grid and map |
+| `/saved/{id}` | "Neighborhood" section with score breakdown |
+| `/saved/{id}` | "Risk Assessment" panel with flags and recommendations |
+| `/deals` search results | Neighborhood score badge on property cards |
+
+### Success Criteria
+
+After Phase 6, you should be able to:
+1. See how a property's price compares to recent sales in 1 click
+2. Understand neighborhood quality with a single score and breakdown
+3. Identify red flags before wasting time on a bad deal
+4. Compare properties not just on financials but on location quality
+5. Make data-driven decisions about which neighborhoods to target
 
 ---
 
