@@ -145,7 +145,7 @@ export function ApiUsageBanner() {
           {isLimitReached ? (
             <>
               <strong>API limit reached</strong> ({usage.requests_used}/{usage.requests_limit} requests).
-              Use the Calculator for manual analysis or upgrade your plan.
+              Import properties via URL or upgrade your plan.
             </>
           ) : (
             <>

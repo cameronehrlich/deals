@@ -189,18 +189,6 @@ export default function DashboardPage() {
           <ArrowRight className="h-5 w-5 text-gray-400" />
         </Link>
 
-        <Link href="/calculator" className="card-hover flex items-center gap-4">
-          <div className="p-3 bg-purple-100 rounded-lg">
-            <DollarSign className="h-6 w-6 text-purple-600" />
-          </div>
-          <div className="flex-1">
-            <h3 className="font-medium text-gray-900">Calculator</h3>
-            <p className="text-sm text-gray-500">
-              Analyze any property
-            </p>
-          </div>
-          <ArrowRight className="h-5 w-5 text-gray-400" />
-        </Link>
       </div>
 
       {/* Top Markets */}

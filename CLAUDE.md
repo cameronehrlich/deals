@@ -50,7 +50,9 @@ web/src/
 │   ├── markets/         # Market list and detail
 │   ├── deals/           # Live search with sorting, load more
 │   ├── import/          # URL import and property analysis
-│   └── calculator/      # Manual entry calculator
+│   ├── saved/           # Saved properties with full analysis
+│   ├── pipeline/        # Kanban board for deal pipeline
+│   └── financing/       # Loan comparison and financing options
 ├── components/
 │   ├── Navigation.tsx
 │   ├── ImageCarousel.tsx    # Property photo carousel

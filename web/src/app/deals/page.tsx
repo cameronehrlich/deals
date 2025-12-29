@@ -423,7 +423,7 @@ function DealsContent() {
       setApiUsage(res.api_usage);
 
       if (res.properties.length === 0 && res.api_usage.warning === "limit_reached") {
-        setError("API limit reached. Use Calculator for manual analysis.");
+        setError("API limit reached. Import properties via URL on the Import page.");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Search failed");
@@ -833,7 +833,7 @@ function DealsContent() {
               <h3 className="text-lg font-medium text-gray-900">No properties found</h3>
               <p className="text-gray-500 mt-1 max-w-md mx-auto">
                 {apiUsage?.warning === "limit_reached"
-                  ? "API limit reached. Use the Calculator for manual property analysis."
+                  ? "API limit reached. Import properties via URL on the Import page."
                   : "No active listings match your criteria. Try adjusting your filters."}
               </p>
               {apiUsage?.warning !== "limit_reached" && (
@@ -842,9 +842,6 @@ function DealsContent() {
                   Try Again
                 </button>
               )}
-              <a href="/calculator" className="btn-outline mt-4 ml-2 inline-flex items-center gap-2">
-                Use Calculator
-              </a>
             </div>
           ) : (
             <div className="space-y-4 animate-fade-in">

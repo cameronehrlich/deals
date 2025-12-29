@@ -52,7 +52,7 @@ deals/
 ├── api/                    # FastAPI REST API
 │   └── routes/             # Endpoints: markets, deals, properties, import, saved
 ├── web/                    # Next.js 14 frontend
-│   └── src/app/            # Pages: dashboard, markets, deals, import, calculator
+│   └── src/app/            # Pages: dashboard, markets, deals, import, saved, pipeline, financing
 ├── src/
 │   ├── models/             # Pydantic models (Property, Financials, Market, Deal)
 │   ├── agents/             # Business logic (MarketResearch, DealAnalyzer, Pipeline)
@@ -166,7 +166,7 @@ The US Real Estate API (RapidAPI) has tiered limits:
 | Pro | 5,000 | $9 |
 | Ultra | 40,000 | $29 |
 
-The platform tracks usage and shows warnings at 80% capacity. When limits are reached, use the Calculator for manual analysis.
+The platform tracks usage and shows warnings at 80% capacity. When limits are reached, import properties via URL on the Import page.
 
 ## Development
 

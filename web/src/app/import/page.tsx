@@ -505,7 +505,7 @@ function AnalyzePageContent() {
         setLoadingStep("");
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Import failed. Try using the Calculator for manual entry.");
+      setError(err instanceof Error ? err.message : "Import failed. Try pasting the full property URL.");
       setLoading(false);
       setLoadingStep("");
     }
@@ -915,14 +915,8 @@ function AnalyzePageContent() {
                 <div className="flex-1">
                   <p className="text-red-700 font-medium">{error}</p>
                   <p className="text-red-600 text-sm mt-2">
-                    Listing sites often block automated requests. Try the Calculator for manual entry instead.
+                    Listing sites often block automated requests. Try pasting the full property URL or searching in the Deals page.
                   </p>
-                  <button
-                    onClick={() => router.push('/calculator')}
-                    className="btn-primary mt-3"
-                  >
-                    Open Calculator
-                  </button>
                 </div>
               </div>
             </div>
@@ -1432,20 +1426,6 @@ function AnalyzePageContent() {
 
               {/* Actions */}
               <div className="flex flex-wrap gap-3">
-                <button
-                  onClick={() => {
-                    const params = new URLSearchParams();
-                    if (offerPrice) params.set('price', offerPrice.toString());
-                    if (result.deal?.property.estimated_rent) params.set('rent', result.deal.property.estimated_rent.toString());
-                    if (result.deal?.property.zip_code) params.set('zip', result.deal.property.zip_code);
-                    params.set('down', downPaymentPct);
-                    params.set('rate', interestRate);
-                    router.push(`/calculator?${params.toString()}`);
-                  }}
-                  className="btn-outline"
-                >
-                  Open in Calculator
-                </button>
                 <button
                   onClick={handleSave}
                   disabled={saving || !!savedId}

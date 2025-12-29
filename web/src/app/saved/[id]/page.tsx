@@ -1574,21 +1574,6 @@ export default function SavedPropertyDetailPage({
 
           {/* Actions */}
           <div className="flex flex-wrap gap-3 justify-center">
-            <button
-              onClick={() => {
-                const params = new URLSearchParams();
-                if (offerPrice) params.set('price', offerPrice.toString());
-                if (savedProperty.estimated_rent) params.set('rent', savedProperty.estimated_rent.toString());
-                if (savedProperty.zip_code) params.set('zip', savedProperty.zip_code);
-                params.set('down', downPaymentPct);
-                params.set('rate', interestRate);
-                router.push(`/calculator?${params.toString()}`);
-              }}
-              className="btn-outline flex items-center gap-2"
-            >
-              <Calculator className="h-4 w-4" />
-              Open in Calculator
-            </button>
             {savedProperty.source_url && (
               <a
                 href={savedProperty.source_url}
