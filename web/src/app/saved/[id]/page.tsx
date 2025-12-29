@@ -60,6 +60,7 @@ import { ScoreGauge } from "@/components/ScoreGauge";
 import { ImageCarousel } from "@/components/ImageCarousel";
 import { FinancingComparison } from "@/components/FinancingComparison";
 import { ContactsPanel } from "@/components/ContactsPanel";
+import { CompsPanel } from "@/components/CompsPanel";
 
 export default function SavedPropertyDetailPage({
   params,
@@ -1289,6 +1290,13 @@ export default function SavedPropertyDetailPage({
               </div>
             </div>
           )}
+
+          {/* Comparable Sales Analysis */}
+          <CompsPanel
+            propertyId={propertyId}
+            subjectPrice={offerPrice ?? savedProperty.list_price}
+            subjectSqft={savedProperty.sqft}
+          />
 
           {/* Location Insights Loading State */}
           {locationLoading && !locationData && savedProperty.latitude && savedProperty.longitude && (

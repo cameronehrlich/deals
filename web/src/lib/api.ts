@@ -1463,6 +1463,72 @@ class ApiClient {
   async compareQuotes(propertyId: string): Promise<any> {
     return this.fetch(`/api/financing-desk/quotes/compare/${propertyId}`);
   }
+
+  // ==================== Comps Methods (Phase 6) ====================
+
+  async getCompsForProperty(propertyId: string, maxResults?: number): Promise<CompsAnalysis> {
+    const params = new URLSearchParams();
+    if (maxResults) params.set("max_results", maxResults.toString());
+    return this.fetch(`/api/comps/property/${propertyId}?${params}`);
+  }
+
+  async getCompsByCityState(params: {
+    city: string;
+    state_code: string;
+    subject_price: number;
+    subject_sqft?: number;
+    bedrooms?: number;
+    min_sqft?: number;
+    max_sqft?: number;
+    max_results?: number;
+  }): Promise<CompsAnalysis> {
+    const searchParams = new URLSearchParams();
+    searchParams.set("city", params.city);
+    searchParams.set("state_code", params.state_code);
+    searchParams.set("subject_price", params.subject_price.toString());
+    if (params.subject_sqft) searchParams.set("subject_sqft", params.subject_sqft.toString());
+    if (params.bedrooms) searchParams.set("bedrooms", params.bedrooms.toString());
+    if (params.min_sqft) searchParams.set("min_sqft", params.min_sqft.toString());
+    if (params.max_sqft) searchParams.set("max_sqft", params.max_sqft.toString());
+    if (params.max_results) searchParams.set("max_results", params.max_results.toString());
+    return this.fetch(`/api/comps/sold?${searchParams}`);
+  }
+}
+
+// ==================== Comps Types (Phase 6) ====================
+
+export interface ComparableSale {
+  property_id: string;
+  address: string;
+  city: string;
+  state: string;
+  zip_code: string;
+  sold_price: number;
+  list_price?: number;
+  bedrooms: number;
+  bathrooms: number;
+  sqft?: number;
+  sold_date?: string;
+  days_on_market?: number;
+  price_per_sqft?: number;
+  distance_miles?: number;
+}
+
+export interface CompsAnalysis {
+  subject_price: number;
+  subject_sqft?: number;
+  subject_price_per_sqft?: number;
+  comp_count: number;
+  median_sold_price?: number;
+  median_price_per_sqft?: number;
+  avg_sold_price?: number;
+  avg_price_per_sqft?: number;
+  min_sold_price?: number;
+  max_sold_price?: number;
+  price_vs_median?: number;
+  price_vs_median_psf?: number;
+  price_position: "above_market" | "below_market" | "at_market" | "unknown";
+  comparables: ComparableSale[];
 }
 
 // Job types
