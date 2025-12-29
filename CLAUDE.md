@@ -226,7 +226,46 @@ Phoenix AZ, Tampa FL, Austin TX, Miami FL, Indianapolis IN, Cleveland OH, Memphi
 
 ## Testing
 
+**Run all tests:**
 ```bash
-pytest tests/ -v
+pytest tests/ -v              # All tests with verbose output
+pytest tests/ -q              # Quick summary
+pytest tests/ --tb=short      # Shorter tracebacks
+```
+
+**Run specific test suites:**
+```bash
+pytest tests/test_repository.py   # Database CRUD operations
+pytest tests/test_cache.py        # Cache manager with TTL
+pytest tests/test_api_routes.py   # API endpoint tests
+pytest tests/test_scoring.py      # Market/deal scoring logic
+pytest tests/test_integration.py  # End-to-end flows
+pytest tests/test_financing.py    # Loan products and calculations
+```
+
+**Test Suite Overview (~200+ tests):**
+
+| File | Tests | Description |
+|------|-------|-------------|
+| `test_repository.py` | ~50 | SQLite repository CRUD: deals, markets, saved properties, jobs |
+| `test_cache.py` | ~25 | CacheManager: TTL, invalidation, income cache, stats |
+| `test_api_routes.py` | ~40 | FastAPI routes: health, deals, markets, saved, jobs |
+| `test_scoring.py` | ~35 | MarketMetrics and DealScore calculations |
+| `test_integration.py` | ~20 | Full flows: deal lifecycle, market enrichment, caching |
+| `test_financing.py` | ~25 | Loan products CRUD, scenario calculations |
+
+**Test Isolation:**
+- Tests use temporary SQLite databases created via `tempfile.NamedTemporaryFile`
+- Each test gets a fresh database that's auto-deleted after the test
+- Your real `deals.db` is never touched by tests
+
+**Key Fixtures (conftest.py):**
+- `repository` - Isolated SQLiteRepository with temp database
+- `sample_deal`, `sample_property`, `sample_market` - Pre-built test data
+- `test_session` - Raw SQLAlchemy session for direct DB access
+- `api_client` - FastAPI TestClient for route testing
+
+**Frontend type checking:**
+```bash
 cd web && npx tsc --noEmit
 ```

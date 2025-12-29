@@ -107,12 +107,14 @@ LOG_LEVEL=INFO              # Logging level
 
 | Source | Purpose | Status |
 |--------|---------|--------|
-| US Real Estate API | Live property listings & search | Active |
+| US Real Estate API | Live property listings, search, agent profiles | Active |
 | Redfin Data Center | Market metrics (prices, inventory) | Active |
 | FRED | Mortgage rates, unemployment | Active |
 | HUD Fair Market Rents | Rent baselines by market | Active |
 | RentCast | Property rent estimates | Active (with fallback) |
 | Census ACS | Income data by ZIP code | Active |
+| Census Geocoder | Address geocoding (lat/lng) | Active |
+| Walk Score API | Walkability, transit, bike scores | Active |
 | URL Parser | Zillow/Redfin/Realtor import | Active (Electron only) |
 
 ## Target Markets
@@ -246,10 +248,23 @@ Find Property → Analyze → Save to Pipeline
 
 **What it does:**
 - Contact tracker tied to properties (not a standalone CRM)
-- Parse listing agent info from property data when available
+- Auto-fetch listing agent info via API when saving a property
 - Communication timeline per property: calls, emails, notes, next follow-up
 - Email templates that auto-fill property details (address, your offer terms, etc.)
 - One-click "copy to clipboard" for quick sending via your email client
+
+**Agent Data Integration (US Real Estate API):**
+
+The US Real Estate API we already use includes agent endpoints at no extra cost:
+
+| Endpoint | Use Case |
+|----------|----------|
+| `/agents/agents-search` | Find agents by city/state |
+| `/agents/agents-search-by-zipcode` | Find agents by ZIP |
+| `/agents/agent-profile` | Get agent details (name, phone, email, brokerage, photo) |
+| `/agents/agent-listings` | See agent's other listings |
+
+When a property is saved, we auto-fetch the listing agent's profile and attach it as a Contact. This gives you agent name, phone, email, and brokerage without manual data entry.
 
 **Templates to include:**
 - Initial inquiry (listed property)
@@ -257,6 +272,13 @@ Find Property → Analyze → Save to Pipeline
 - Follow-up (Day 1, Day 3, Day 7)
 - Offer submission cover
 - Request for disclosures/rent roll
+
+**Future: Skip Tracing (Off-Market)**
+
+For off-market outreach where you need to find property owners directly:
+- Tracerfy API: $0.009/record, finds phone/email for property owners
+- BatchData: Pierces LLC/trust ownership to find actual decision-makers
+- These would only be added if/when off-market sourcing becomes a priority
 
 #### 5.3 Financing Desk
 
@@ -269,7 +291,11 @@ Find Property → Analyze → Save to Pipeline
 - **Lender Directory:** Track lenders you've worked with or researched, with notes on rates, requirements, responsiveness, and markets served
 - **Quote Comparison Grid:** When you get quotes back, enter them in a normalized format to compare: rate, points, term, prepay penalty, DSCR requirement, close timeline
 
-**No marketplace integration:** Investment property lending is relationship-based with too much variability for API integration. This is a user-maintained system that gets more valuable as you collect data.
+**No lender marketplace integration:** Investment property lending is relationship-based with too much variability for API integration. This is a user-maintained system that gets more valuable as you collect data.
+
+**Mortgage Rate Baseline (Optional):**
+
+Conventional mortgage rate APIs exist (Zillow Mortgage API, US Mortgage Rates API) and could provide a "market baseline" to compare your lender quotes against. However, DSCR/investment property rates are typically 1-1.5% higher than conventional and vary significantly by lender, so these are reference points only - not actionable quotes.
 
 #### 5.4 Offers & Pipeline
 

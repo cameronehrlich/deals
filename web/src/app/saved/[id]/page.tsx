@@ -44,8 +44,11 @@ import {
   ShieldCheck,
   Calculator,
   Home,
+  GitBranch,
+  FileText,
+  ChevronDown,
 } from "lucide-react";
-import { api, SavedProperty, MacroDataResponse } from "@/lib/api";
+import { api, SavedProperty, MacroDataResponse, DealStage, Offer } from "@/lib/api";
 import {
   cn,
   formatCurrency,
@@ -55,6 +58,8 @@ import {
 import { LoadingPage, LoadingSpinner } from "@/components/LoadingSpinner";
 import { ScoreGauge } from "@/components/ScoreGauge";
 import { ImageCarousel } from "@/components/ImageCarousel";
+import { FinancingComparison } from "@/components/FinancingComparison";
+import { ContactsPanel } from "@/components/ContactsPanel";
 
 export default function SavedPropertyDetailPage({
   params,
@@ -89,6 +94,13 @@ export default function SavedPropertyDetailPage({
   // Notes editing
   const [editingNotes, setEditingNotes] = useState(false);
   const [notesValue, setNotesValue] = useState("");
+
+  // Pipeline state
+  const [dealStages, setDealStages] = useState<DealStage[]>([]);
+  const [currentStage, setCurrentStage] = useState<string | null>(null);
+  const [offers, setOffers] = useState<Offer[]>([]);
+  const [showStageMenu, setShowStageMenu] = useState(false);
+  const [updatingStage, setUpdatingStage] = useState(false);
 
   // Fetch current rates
   useEffect(() => {
@@ -146,6 +158,30 @@ export default function SavedPropertyDetailPage({
 
     fetchData();
   }, [propertyId]);
+
+  // Fetch pipeline data (stages and offers for this property)
+  useEffect(() => {
+    async function fetchPipelineData() {
+      try {
+        const [stages, propertyOffers] = await Promise.all([
+          api.getDealStages(),
+          api.getOffers({ property_id: propertyId }),
+        ]);
+        setDealStages(stages);
+        setOffers(propertyOffers);
+      } catch (err) {
+        console.error("Failed to fetch pipeline data:", err);
+      }
+    }
+    fetchPipelineData();
+  }, [propertyId]);
+
+  // Update current stage when savedProperty changes
+  useEffect(() => {
+    if (savedProperty?.deal_data?.stage) {
+      setCurrentStage(savedProperty.deal_data.stage);
+    }
+  }, [savedProperty]);
 
   // Auto-fetch location data if property has no location data
   // The backend will geocode if coordinates are missing
@@ -406,12 +442,12 @@ export default function SavedPropertyDetailPage({
     if (!savedProperty) return;
     try {
       setReenriching(true);
-      const updated = await api.reenrichProperty(savedProperty.id);
-      setSavedProperty(updated);
-      const newAnalysis = await api.getSavedPropertyAnalysis(savedProperty.id).catch(() => null);
-      setAnalysis(newAnalysis);
+      const result = await api.reenrichProperty(savedProperty.id);
+      // Job was queued - show message and redirect to jobs page or stay here
+      alert(`Re-enrich job queued! Check the Jobs page for progress.\n\nJob ID: ${result.job_id}`);
     } catch (err) {
-      console.error("Failed to re-enrich property:", err);
+      console.error("Failed to queue re-enrich job:", err);
+      alert("Failed to queue re-enrich job");
     } finally {
       setReenriching(false);
     }
@@ -456,6 +492,28 @@ export default function SavedPropertyDetailPage({
     } catch (err) {
       console.error("Failed to save notes:", err);
     }
+  };
+
+  // Handle stage change
+  const handleStageChange = async (newStage: string) => {
+    if (!savedProperty) return;
+    try {
+      setUpdatingStage(true);
+      await api.updatePropertyStage(savedProperty.id, newStage);
+      setCurrentStage(newStage);
+      setShowStageMenu(false);
+    } catch (err) {
+      console.error("Failed to update stage:", err);
+    } finally {
+      setUpdatingStage(false);
+    }
+  };
+
+  // Get stage display name
+  const getStageName = (stageId: string | null) => {
+    if (!stageId) return "Not Started";
+    const stage = dealStages.find(s => s.id === stageId);
+    return stage?.name || stageId;
   };
 
   if (loading) {
@@ -728,6 +786,7 @@ export default function SavedPropertyDetailPage({
                 <ImageCarousel
                   images={savedProperty.photos}
                   alt={savedProperty.address}
+                  enableFullscreen
                 />
               </div>
             </div>
@@ -788,6 +847,109 @@ export default function SavedPropertyDetailPage({
                 <ScoreGauge score={adjustedFinancials.dealScore} label="Deal Score" size="md" />
               )}
             </div>
+          </div>
+
+          {/* Pipeline Status */}
+          <div className="card border-primary-100">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                <GitBranch className="h-5 w-5 text-primary-600" />
+                Pipeline Status
+              </h3>
+              <Link
+                href="/pipeline"
+                className="text-sm text-primary-600 hover:text-primary-700"
+              >
+                View Pipeline
+              </Link>
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center gap-4">
+              {/* Deal Stage Selector */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowStageMenu(!showStageMenu)}
+                  disabled={updatingStage}
+                  className={cn(
+                    "flex items-center gap-2 px-4 py-2 rounded-lg border transition-colors",
+                    currentStage
+                      ? "bg-primary-50 border-primary-200 text-primary-700"
+                      : "bg-gray-50 border-gray-200 text-gray-600",
+                    "hover:bg-primary-100"
+                  )}
+                >
+                  {updatingStage ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <GitBranch className="h-4 w-4" />
+                  )}
+                  <span className="font-medium">{getStageName(currentStage)}</span>
+                  <ChevronDown className="h-4 w-4" />
+                </button>
+
+                {showStageMenu && (
+                  <div className="absolute top-full left-0 mt-1 w-56 bg-white border rounded-lg shadow-lg z-20 py-1 max-h-64 overflow-y-auto">
+                    {dealStages.map((stage) => (
+                      <button
+                        key={stage.id}
+                        onClick={() => handleStageChange(stage.id)}
+                        className={cn(
+                          "w-full text-left px-4 py-2 text-sm hover:bg-gray-50",
+                          currentStage === stage.id && "bg-primary-50 text-primary-700 font-medium"
+                        )}
+                      >
+                        {stage.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Offers Summary */}
+              {offers.length > 0 && (
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-lg">
+                  <FileText className="h-4 w-4 text-amber-600" />
+                  <span className="text-sm text-amber-700">
+                    {offers.length} offer{offers.length !== 1 ? "s" : ""}
+                    {offers.some(o => o.status === "submitted") && (
+                      <span className="ml-1 font-medium">
+                        ({offers.filter(o => o.status === "submitted").length} active)
+                      </span>
+                    )}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Active Offers */}
+            {offers.filter(o => ["submitted", "countered"].includes(o.status)).length > 0 && (
+              <div className="mt-4 pt-4 border-t">
+                <h4 className="text-sm font-medium text-gray-700 mb-2">Active Offers</h4>
+                <div className="space-y-2">
+                  {offers
+                    .filter(o => ["submitted", "countered"].includes(o.status))
+                    .map((offer) => (
+                      <div
+                        key={offer.id}
+                        className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+                      >
+                        <div>
+                          <span className="font-semibold">{formatCurrency(offer.offer_price)}</span>
+                          <span className={cn(
+                            "ml-2 text-xs px-2 py-0.5 rounded-full",
+                            offer.status === "submitted" ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"
+                          )}>
+                            {offer.status}
+                          </span>
+                        </div>
+                        <div className="text-sm text-gray-500">
+                          {offer.submitted_at && new Date(offer.submitted_at).toLocaleDateString()}
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Financial Analysis */}
@@ -859,6 +1021,22 @@ export default function SavedPropertyDetailPage({
               </div>
             </div>
           )}
+
+          {/* Financing Comparison - Compare different loan products */}
+          {savedProperty.list_price && savedProperty.estimated_rent && (
+            <FinancingComparison
+              purchasePrice={offerPrice || savedProperty.list_price}
+              monthlyRent={savedProperty.estimated_rent}
+            />
+          )}
+
+          {/* Contacts & Outreach Panel */}
+          <ContactsPanel
+            propertyId={propertyId}
+            propertyAddress={savedProperty.address}
+            propertyCity={savedProperty.city}
+            listPrice={savedProperty.list_price}
+          />
 
           {/* Stress Test / Sensitivity Analysis */}
           {adjustedFinancials?.sensitivity && (

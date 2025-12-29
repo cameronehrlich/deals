@@ -953,6 +953,7 @@ function AnalyzePageContent() {
                     <ImageCarousel
                       images={passedProperty.photos}
                       alt={result.deal.property.address}
+                      enableFullscreen
                     />
                   </div>
                 </div>

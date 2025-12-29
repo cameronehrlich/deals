@@ -1054,226 +1054,52 @@ async def reanalyze_property(property_id: str):
     return build_property_response(prop)
 
 
-@router.post("/properties/{property_id}/reenrich", response_model=SavedPropertyResponse)
+class ReenrichResponse(BaseModel):
+    """Response when a re-enrich job is queued."""
+    job_id: str
+    property_id: str
+    message: str
+
+
+@router.post("/properties/{property_id}/reenrich", response_model=ReenrichResponse)
 async def reenrich_property(property_id: str):
     """
-    Fully re-enrich a saved property by re-fetching all data from source.
+    Queue a job to re-enrich a saved property.
 
-    This will:
-    1. Re-fetch listing data from the original source (if available) to get fresh photos
-    2. Refresh location data (Walk Score, flood zone, etc.)
+    This enqueues an enrich_property job that will:
+    1. Refresh location data (Walk Score, flood zone, etc.)
+    2. Get fresh rent estimates
     3. Re-run full analysis with current market data
 
-    Use this when you want to refresh all data for a property.
+    The job runs in the background - check the jobs page for status.
     """
-    from src.data_sources.aggregator import DataAggregator
-    from src.data_sources.real_estate_providers import get_provider
-    from src.data_sources.walkscore import WalkScoreClient
-    from src.data_sources.fema_flood import FEMAFloodClient
-    from src.models.property import Property, PropertyType, PropertyStatus
-    from src.models.deal import Deal, DealPipeline
-    from src.models.financials import Financials, LoanTerms
-    import re
-
     repo = get_repository()
     prop = repo.get_saved_property(property_id)
 
     if not prop:
         raise HTTPException(status_code=404, detail="Property not found")
 
-    aggregator = DataAggregator()
-    errors = []
+    # Get existing loan terms to preserve them
+    existing_analysis = prop.analysis_data or {}
+    existing_financials = existing_analysis.get("financials", {})
+    existing_loan = existing_financials.get("loan", {})
 
-    try:
-        # Step 1: Try to re-fetch listing data from source
-        # Parse the property ID to extract the original listing ID
-        # Format: us_real_estate_listings_679768 or imported_us_real_estate_listings_986033
-        listing_id_match = re.search(r'us_real_estate_listings_(\d+)', property_id)
+    # Enqueue the enrichment job
+    job = repo.create_job(
+        job_type="enrich_property",
+        payload={
+            "property_id": property_id,
+            "down_payment_pct": existing_loan.get("down_payment_pct", 0.25),
+            "interest_rate": existing_loan.get("interest_rate", 0.07),
+        },
+        priority=2,  # Higher priority for user-initiated re-enrich
+    )
 
-        if listing_id_match:
-            original_listing_id = listing_id_match.group(1)
-            try:
-                provider = get_provider()
-                if provider and provider.is_configured:
-                    fresh_listing = await provider.get_property_detail(original_listing_id)
-                    if fresh_listing:
-                        # Update property with fresh data
-                        if fresh_listing.photos:
-                            prop.photos = fresh_listing.photos
-                        if fresh_listing.price:
-                            prop.list_price = fresh_listing.price
-                        if fresh_listing.bedrooms:
-                            prop.bedrooms = fresh_listing.bedrooms
-                        if fresh_listing.bathrooms:
-                            prop.bathrooms = fresh_listing.bathrooms
-                        if fresh_listing.sqft:
-                            prop.sqft = fresh_listing.sqft
-                        if fresh_listing.source_url:
-                            prop.source_url = fresh_listing.source_url
-                        print(f"[Re-enrich] Refreshed listing data for {prop.address}")
-            except Exception as e:
-                errors.append(f"Failed to refresh listing: {str(e)}")
-                print(f"[Re-enrich] Could not refresh listing data: {e}")
-
-        # Step 2: Refresh location data
-        location_data = prop.location_data or {}
-        latitude = prop.latitude
-        longitude = prop.longitude
-
-        # Geocode if needed
-        if not latitude or not longitude:
-            from src.data_sources.geocoder import CensusGeocoder
-            try:
-                geocoder = CensusGeocoder()
-                result = await geocoder.geocode(
-                    address=prop.address,
-                    city=prop.city,
-                    state=prop.state,
-                    zip_code=prop.zip_code,
-                )
-                if result:
-                    latitude = result.get("latitude")
-                    longitude = result.get("longitude")
-                    prop.latitude = latitude
-                    prop.longitude = longitude
-            except Exception as e:
-                errors.append(f"Geocoding failed: {str(e)}")
-
-        # Walk Score
-        if latitude and longitude:
-            try:
-                walkscore = WalkScoreClient()
-                score_data = await walkscore.get_scores(
-                    address=prop.address,
-                    lat=latitude,
-                    lon=longitude,
-                )
-                if score_data:
-                    location_data["walk_score"] = score_data.get("walkscore")
-                    location_data["walk_description"] = score_data.get("description")
-                    location_data["transit_score"] = score_data.get("transit", {}).get("score")
-                    location_data["transit_description"] = score_data.get("transit", {}).get("description")
-                    location_data["bike_score"] = score_data.get("bike", {}).get("score")
-                    location_data["bike_description"] = score_data.get("bike", {}).get("description")
-            except Exception as e:
-                errors.append(f"Walk Score failed: {str(e)}")
-
-            # Flood zone
-            try:
-                flood_client = FEMAFloodClient()
-                flood_data = await flood_client.get_flood_zone(latitude, longitude)
-                if flood_data:
-                    location_data["flood_zone"] = flood_data.get("zone")
-                    location_data["flood_zone_description"] = flood_data.get("description")
-                    location_data["in_flood_zone"] = flood_data.get("in_flood_zone", False)
-            except Exception as e:
-                errors.append(f"Flood zone failed: {str(e)}")
-
-        prop.location_data = location_data
-
-        # Step 3: Re-run full analysis
-        type_mapping = {
-            "single_family_home": PropertyType.SFH,
-            "single_family": PropertyType.SFH,
-            "condo": PropertyType.CONDO,
-            "townhouse": PropertyType.TOWNHOUSE,
-            "duplex": PropertyType.DUPLEX,
-            "triplex": PropertyType.TRIPLEX,
-            "fourplex": PropertyType.FOURPLEX,
-            "multi_family": PropertyType.MULTI_FAMILY,
-        }
-        prop_type = type_mapping.get(
-            (prop.property_type or "").lower().replace("-", "_").replace(" ", "_"),
-            PropertyType.SFH
-        )
-
-        property_obj = Property(
-            id=prop.id,
-            address=prop.address,
-            city=prop.city,
-            state=prop.state,
-            zip_code=prop.zip_code,
-            list_price=prop.list_price or 0,
-            property_type=prop_type,
-            bedrooms=prop.bedrooms or 3,
-            bathrooms=prop.bathrooms or 2.0,
-            sqft=prop.sqft,
-            latitude=latitude,
-            longitude=longitude,
-            status=PropertyStatus.ACTIVE,
-            source=prop.source,
-            source_url=prop.source_url,
-        )
-
-        # Fetch fresh rent estimate
-        rent_estimate = await aggregator.rentcast.get_rent_estimate(
-            address=prop.address,
-            city=prop.city,
-            state=prop.state,
-            zip_code=prop.zip_code or "",
-            bedrooms=prop.bedrooms or 3,
-            bathrooms=prop.bathrooms or 2.0,
-            sqft=prop.sqft,
-        )
-
-        if rent_estimate:
-            property_obj.estimated_rent = rent_estimate.rent_estimate
-            prop.estimated_rent = rent_estimate.rent_estimate
-
-        # Get fresh market data
-        market_data = await aggregator.get_market_data(prop.city, prop.state)
-        market = market_data.to_market() if market_data else None
-
-        # Create deal and run analysis
-        deal = Deal(
-            id=f"reenriched_{prop.id}",
-            property=property_obj,
-            market=market,
-            pipeline_status=DealPipeline.ANALYZED,
-            first_seen=prop.created_at,
-        )
-
-        # Use existing loan terms if available
-        existing_analysis = prop.analysis_data or {}
-        existing_financials = existing_analysis.get("financials", {})
-        existing_loan = existing_financials.get("loan", {})
-
-        deal.financials = Financials(
-            property_id=property_obj.id,
-            purchase_price=prop.list_price or 0,
-            estimated_rent=property_obj.estimated_rent or 0,
-            loan=LoanTerms(
-                down_payment_pct=existing_loan.get("down_payment_pct", 0.25),
-                interest_rate=existing_loan.get("interest_rate", 0.07),
-            ),
-        )
-
-        deal.analyze()
-
-        # Update property with analysis results
-        prop.overall_score = deal.score.overall_score if deal.score else None
-        prop.financial_score = deal.score.financial_score if deal.score else None
-        prop.market_score = deal.score.market_score if deal.score else None
-        prop.risk_score = deal.score.risk_score if deal.score else None
-        prop.liquidity_score = deal.score.liquidity_score if deal.score else None
-        prop.cash_flow = deal.financials.monthly_cash_flow if deal.financials else None
-        prop.cash_on_cash = deal.financial_metrics.cash_on_cash_return if deal.financial_metrics else None
-        prop.cap_rate = deal.financial_metrics.cap_rate if deal.financial_metrics else None
-        prop.analysis_data = deal.model_dump(mode='json')
-        prop.last_analyzed = datetime.utcnow()
-        prop.updated_at = datetime.utcnow()
-
-        # Store any errors encountered
-        if errors:
-            prop.analysis_data["reenrich_errors"] = errors
-
-        repo.session.commit()
-        print(f"[Re-enrich] Completed for {prop.address}, errors: {errors if errors else 'none'}")
-
-    finally:
-        await aggregator.close()
-
-    return build_property_response(prop)
+    return ReenrichResponse(
+        job_id=job.id,
+        property_id=property_id,
+        message=f"Re-enrich job queued for {prop.address}",
+    )
 
 
 class CustomScenarioRequest(BaseModel):

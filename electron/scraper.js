@@ -1,9 +1,9 @@
 /**
- * Local Puppeteer-based property scraper.
+ * Local Playwright-based property scraper.
  * Runs in the Electron main process using the user's residential IP.
  */
 
-const puppeteer = require('puppeteer');
+const { chromium } = require('playwright');
 
 // Detect source from URL
 function detectSource(url) {
@@ -21,8 +21,8 @@ async function scrapeProperty(url) {
     throw new Error(`Unsupported URL: ${url}`);
   }
 
-  const browser = await puppeteer.launch({
-    headless: 'new',
+  const browser = await chromium.launch({
+    headless: true,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
@@ -33,18 +33,16 @@ async function scrapeProperty(url) {
   });
 
   try {
-    const page = await browser.newPage();
+    // Create context with user agent and viewport
+    const context = await browser.newContext({
+      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      viewport: { width: 1920, height: 1080 },
+    });
 
-    // Set a realistic user agent
-    await page.setUserAgent(
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    );
-
-    // Set viewport
-    await page.setViewport({ width: 1920, height: 1080 });
+    const page = await context.newPage();
 
     // Navigate to the page
-    await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+    await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
 
     // Wait a bit for dynamic content
     await page.waitForTimeout(2000);

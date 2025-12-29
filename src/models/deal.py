@@ -4,16 +4,13 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
 from src.models.property import Property
 from src.models.financials import Financials, FinancialMetrics
 from src.models.market import Market, MarketMetrics
-
-if TYPE_CHECKING:
-    from src.analysis.sensitivity import SensitivityResult
 
 
 class DealPipeline(str, Enum):
@@ -189,7 +186,7 @@ class Deal(BaseModel):
     score: Optional[DealScore] = None
 
     # Sensitivity analysis
-    sensitivity: Optional[SensitivityResult] = None
+    sensitivity: Optional[Any] = None  # SensitivityResult - uses Any to avoid circular import
 
     # Pipeline tracking
     pipeline_status: DealPipeline = Field(default=DealPipeline.NEW)

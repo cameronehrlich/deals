@@ -10,6 +10,8 @@ import {
   BarChart3,
   Bookmark,
   Settings,
+  GitBranch,
+  DollarSign,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -18,6 +20,8 @@ const navigation = [
   { name: "Markets", href: "/markets", icon: MapPin },
   { name: "Find Deals", href: "/deals", icon: Search },
   { name: "Saved", href: "/saved", icon: Bookmark },
+  { name: "Pipeline", href: "/pipeline", icon: GitBranch },
+  { name: "Financing", href: "/financing", icon: DollarSign },
   { name: "Analyze", href: "/import", icon: BarChart3 },
 ];
 

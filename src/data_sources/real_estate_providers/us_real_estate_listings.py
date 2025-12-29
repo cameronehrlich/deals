@@ -297,8 +297,10 @@ class USRealEstateListingsProvider(BaseProvider):
             """Extract unique image ID from CDN URL for deduplication."""
             if not url:
                 return ""
-            # Remove query params first
-            base_url = url.split("?")[0]
+            # Normalize protocol (http vs https)
+            base_url = url.replace("http://", "https://")
+            # Remove query params
+            base_url = base_url.split("?")[0]
             # Remove size suffixes to get base image ID
             # e.g., "...abc123-w480_h360.jpg" and "...abc123-w1024_h768.jpg" -> same base
             import re
@@ -307,6 +309,12 @@ class USRealEstateListingsProvider(BaseProvider):
             # Also remove -s, -m, -l, -o size suffixes
             normalized = re.sub(r'-[smlo](?=\.jpg|\.png|\.webp)', '', normalized, flags=re.IGNORECASE)
             return normalized
+
+        def normalize_photo_url(url: str) -> str:
+            """Normalize photo URL to use https."""
+            if not url:
+                return url
+            return url.replace("http://", "https://")
 
         photos = []
         seen_ids = set()
@@ -319,11 +327,11 @@ class USRealEstateListingsProvider(BaseProvider):
                 img_id = get_image_id(href)
                 if img_id not in seen_ids:
                     seen_ids.add(img_id)
-                    photos.append(href)
+                    photos.append(normalize_photo_url(href))
 
         # Only add primary_photo if it's not already in the list
         if item.get("primary_photo", {}).get("href"):
-            primary_photo = item["primary_photo"]["href"]
+            primary_photo = normalize_photo_url(item["primary_photo"]["href"])
             img_id = get_image_id(primary_photo)
             if img_id not in seen_ids:
                 # Insert at beginning since it's the primary

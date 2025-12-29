@@ -109,6 +109,9 @@ class SavedPropertyDB(Base):
     # User's custom financing scenarios for "What Should I Offer" feature
     custom_scenarios = Column(JSON)  # [{offer_price, down_payment_pct, interest_rate, ...}, ...]
 
+    # Deal pipeline data (stage, due diligence checklist, stage history)
+    deal_data = Column(JSON)  # {stage, stage_updated_at, stage_history, due_diligence}
+
     # Pipeline and user data
     pipeline_status = Column(String, default='analyzed')  # new, analyzing, analyzed, shortlisted, rejected
     notes = Column(Text)
@@ -229,6 +232,382 @@ class JobDB(Base):
         return f"<Job {self.job_type} ({self.status})>"
 
 
+# ==================== Phase 5: Transaction Pipeline ====================
+
+class LoanProductDB(Base):
+    """
+    Reusable loan product templates (presets).
+
+    Examples: "Conventional 25% down", "DSCR 20% down", "Hard Money"
+    These are user-maintained templates that can be quickly applied to properties.
+    """
+    __tablename__ = 'loan_products'
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    name = Column(String, nullable=False)  # "Conventional 25%", "DSCR 20%", etc.
+    description = Column(String)
+
+    # Loan terms
+    down_payment_pct = Column(Float, default=0.25)
+    interest_rate = Column(Float, default=0.07)  # Annual rate
+    loan_term_years = Column(Integer, default=30)
+    points = Column(Float, default=0)
+    closing_cost_pct = Column(Float, default=0.03)
+
+    # DSCR-specific
+    is_dscr = Column(Boolean, default=False)
+    min_dscr_required = Column(Float)  # e.g., 1.25 for DSCR loans
+
+    # Categorization
+    loan_type = Column(String)  # conventional, dscr, hard_money, portfolio, fha, va
+    is_default = Column(Boolean, default=False)  # Show in quick presets
+
+    # Metadata
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<LoanProduct {self.name}>"
+
+
+class ContactDB(Base):
+    """
+    Contact tied to properties (agents, sellers, lenders).
+
+    This is property-centric CRM - contacts exist in context of deals.
+    """
+    __tablename__ = 'contacts'
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+
+    # Contact info
+    name = Column(String, nullable=False)
+    email = Column(String)
+    phone = Column(String)
+    company = Column(String)  # Brokerage, lending company, etc.
+
+    # Role
+    contact_type = Column(String)  # listing_agent, buyer_agent, seller, lender, other
+
+    # Linked properties (JSON array of property IDs)
+    property_ids = Column(JSON, default=list)
+
+    # Agent-specific data (from API)
+    agent_id = Column(String)  # External agent ID from API
+    agent_photo_url = Column(String)
+    agent_profile_data = Column(JSON)  # Full profile from API
+
+    # User notes
+    notes = Column(Text)
+
+    # Status tracking
+    last_contacted = Column(DateTime)
+    next_followup = Column(DateTime)
+
+    # Metadata
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<Contact {self.name} ({self.contact_type})>"
+
+
+class CommunicationDB(Base):
+    """
+    Communication log entry tied to a contact and property.
+
+    Tracks all interactions: calls, emails, notes, meetings.
+    """
+    __tablename__ = 'communications'
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+
+    # Links
+    contact_id = Column(String, nullable=False, index=True)
+    property_id = Column(String, index=True)  # Optional - some comms may be general
+
+    # Communication details
+    comm_type = Column(String, nullable=False)  # email, call, text, meeting, note
+    direction = Column(String)  # inbound, outbound, internal
+    subject = Column(String)
+    content = Column(Text)
+
+    # For email templates
+    template_used = Column(String)  # Template ID if used
+
+    # Metadata
+    occurred_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<Communication {self.comm_type} with {self.contact_id}>"
+
+
+class OfferDB(Base):
+    """
+    Offer tracking for properties.
+
+    Tracks offer submissions, counteroffers, and outcomes.
+    """
+    __tablename__ = 'offers'
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    property_id = Column(String, nullable=False, index=True)
+
+    # Offer terms
+    offer_price = Column(Float, nullable=False)
+    down_payment_pct = Column(Float, default=0.25)
+    financing_type = Column(String)  # conventional, dscr, cash, etc.
+    earnest_money = Column(Float)
+
+    # Contingencies
+    contingencies = Column(JSON)  # ["inspection", "financing", "appraisal"]
+    inspection_days = Column(Integer)
+    financing_days = Column(Integer)
+    closing_days = Column(Integer)
+
+    # Status
+    status = Column(String, default='draft')  # draft, submitted, countered, accepted, rejected, withdrawn, expired
+    submitted_at = Column(DateTime)
+    expires_at = Column(DateTime)
+    response_deadline = Column(DateTime)
+
+    # Counter offers (JSON array)
+    counter_history = Column(JSON, default=list)  # [{price, date, notes}, ...]
+
+    # Outcome
+    final_price = Column(Float)  # If accepted
+    outcome_notes = Column(Text)
+
+    # Metadata
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<Offer ${self.offer_price:,.0f} on {self.property_id} ({self.status})>"
+
+
+class BorrowerProfileDB(Base):
+    """
+    User's borrower profile for financing.
+
+    One-time setup that can be reused across all deal packets.
+    Single record per user (for now, single-user system).
+    """
+    __tablename__ = 'borrower_profile'
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+
+    # Personal info
+    full_name = Column(String)
+    entity_name = Column(String)  # LLC name if applicable
+    entity_type = Column(String)  # individual, llc, trust
+
+    # Financial snapshot
+    annual_income = Column(Float)
+    liquid_assets = Column(Float)
+    total_net_worth = Column(Float)
+    credit_score_range = Column(String)  # "740-760", "760-780", etc.
+
+    # Experience
+    properties_owned = Column(Integer, default=0)
+    years_investing = Column(Integer, default=0)
+
+    # Pre-approvals (JSON array)
+    pre_approvals = Column(JSON, default=list)  # [{lender, amount, expires, type}, ...]
+
+    # Document links (URLs to external storage)
+    documents = Column(JSON, default=dict)  # {"pay_stubs": "url", "bank_statements": "url", ...}
+
+    # Notes
+    notes = Column(Text)
+
+    # Metadata
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<BorrowerProfile {self.full_name or self.entity_name}>"
+
+
+class LenderDB(Base):
+    """
+    Lender directory entry.
+
+    User-maintained database of lenders with notes on rates,
+    requirements, responsiveness, and markets served.
+    """
+    __tablename__ = 'lenders'
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+
+    # Lender info
+    name = Column(String, nullable=False)
+    company = Column(String)
+    email = Column(String)
+    phone = Column(String)
+    website = Column(String)
+
+    # Specialization
+    lender_type = Column(String)  # bank, credit_union, mortgage_broker, portfolio, hard_money
+    loan_types = Column(JSON, default=list)  # ["conventional", "dscr", "hard_money"]
+    markets_served = Column(JSON, default=list)  # ["FL", "TX"] or ["nationwide"]
+
+    # Terms (general)
+    typical_rate_range = Column(String)  # "6.5% - 7.5%"
+    min_down_payment = Column(Float)
+    min_credit_score = Column(Integer)
+    min_dscr = Column(Float)
+
+    # User experience tracking
+    responsiveness_rating = Column(Integer)  # 1-5
+    accuracy_rating = Column(Integer)  # 1-5 (quote vs final)
+    overall_rating = Column(Integer)  # 1-5
+    deals_closed = Column(Integer, default=0)
+
+    # Notes
+    notes = Column(Text)
+    pros = Column(JSON, default=list)
+    cons = Column(JSON, default=list)
+
+    # Metadata
+    last_contacted = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<Lender {self.name}>"
+
+
+class LenderQuoteDB(Base):
+    """
+    Specific quote from a lender for a property.
+
+    Stores normalized quote data for comparison.
+    """
+    __tablename__ = 'lender_quotes'
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+
+    # Links
+    lender_id = Column(String, nullable=False, index=True)
+    property_id = Column(String, nullable=False, index=True)
+
+    # Loan terms
+    loan_amount = Column(Float)
+    interest_rate = Column(Float)
+    apr = Column(Float)
+    points = Column(Float)
+    origination_fee = Column(Float)
+    other_fees = Column(Float)
+
+    # Structure
+    loan_type = Column(String)  # conventional, dscr, arm, etc.
+    term_years = Column(Integer)
+    amortization_years = Column(Integer)
+    is_fixed = Column(Boolean, default=True)
+    arm_details = Column(String)  # "5/1 ARM" etc.
+
+    # Requirements
+    min_dscr = Column(Float)
+    reserves_months = Column(Integer)
+    prepay_penalty = Column(String)  # "None", "3-2-1", etc.
+
+    # Timeline
+    close_days = Column(Integer)
+    rate_lock_days = Column(Integer)
+
+    # Status
+    status = Column(String, default='quoted')  # quoted, selected, declined, expired
+    expires_at = Column(DateTime)
+
+    # Notes
+    notes = Column(Text)
+    conditions = Column(JSON, default=list)  # ["Appraisal", "Updated bank statement"]
+
+    # Metadata
+    quoted_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<LenderQuote {self.interest_rate}% from {self.lender_id}>"
+
+
+# Default loan products (presets)
+DEFAULT_LOAN_PRODUCTS = [
+    {
+        "name": "Conventional 25% Down",
+        "description": "Standard conventional loan with 25% down payment",
+        "down_payment_pct": 0.25,
+        "interest_rate": 0.07,
+        "loan_term_years": 30,
+        "closing_cost_pct": 0.03,
+        "loan_type": "conventional",
+        "is_dscr": False,
+        "is_default": True,
+    },
+    {
+        "name": "Conventional 20% Down",
+        "description": "Conventional loan with 20% down (may require PMI)",
+        "down_payment_pct": 0.20,
+        "interest_rate": 0.0725,
+        "loan_term_years": 30,
+        "closing_cost_pct": 0.03,
+        "loan_type": "conventional",
+        "is_dscr": False,
+        "is_default": True,
+    },
+    {
+        "name": "DSCR 25% Down",
+        "description": "Debt Service Coverage Ratio loan - no income verification",
+        "down_payment_pct": 0.25,
+        "interest_rate": 0.075,
+        "loan_term_years": 30,
+        "closing_cost_pct": 0.03,
+        "loan_type": "dscr",
+        "is_dscr": True,
+        "min_dscr_required": 1.25,
+        "is_default": True,
+    },
+    {
+        "name": "DSCR 20% Down",
+        "description": "DSCR loan with lower down payment",
+        "down_payment_pct": 0.20,
+        "interest_rate": 0.08,
+        "loan_term_years": 30,
+        "closing_cost_pct": 0.03,
+        "loan_type": "dscr",
+        "is_dscr": True,
+        "min_dscr_required": 1.25,
+        "is_default": True,
+    },
+    {
+        "name": "Hard Money Bridge",
+        "description": "Short-term hard money loan for acquisitions/rehab",
+        "down_payment_pct": 0.25,
+        "interest_rate": 0.12,
+        "loan_term_years": 1,
+        "points": 2.0,
+        "closing_cost_pct": 0.04,
+        "loan_type": "hard_money",
+        "is_dscr": False,
+        "is_default": True,
+    },
+    {
+        "name": "All Cash",
+        "description": "Cash purchase - no financing",
+        "down_payment_pct": 1.0,
+        "interest_rate": 0.0,
+        "loan_term_years": 0,
+        "closing_cost_pct": 0.02,
+        "loan_type": "cash",
+        "is_dscr": False,
+        "is_default": True,
+    },
+]
+
+
 # Default favorite markets (user's researched list)
 DEFAULT_FAVORITE_MARKETS = [
     {"name": "Indianapolis", "state": "IN", "metro": "Indianapolis-Carmel-Anderson"},
@@ -286,6 +665,33 @@ def get_session(engine=None):
     return Session()
 
 
+def _run_migrations(engine):
+    """
+    Run database migrations for new columns on existing tables.
+    This handles adding columns that were added after the initial schema.
+    """
+    from sqlalchemy import text, inspect
+
+    inspector = inspect(engine)
+    connection = engine.connect()
+
+    try:
+        # Migration 1: Add deal_data column to saved_properties if it doesn't exist
+        if 'saved_properties' in inspector.get_table_names():
+            columns = [col['name'] for col in inspector.get_columns('saved_properties')]
+            if 'deal_data' not in columns:
+                connection.execute(text(
+                    "ALTER TABLE saved_properties ADD COLUMN deal_data JSON"
+                ))
+                connection.commit()
+                print("Migration: Added deal_data column to saved_properties")
+
+    except Exception as e:
+        print(f"Migration warning: {e}")
+    finally:
+        connection.close()
+
+
 def init_database(engine=None):
     """Initialize the database schema and seed data."""
     if engine is None:
@@ -293,6 +699,9 @@ def init_database(engine=None):
 
     # Create all tables
     Base.metadata.create_all(engine)
+
+    # Run migrations for new columns on existing tables
+    _run_migrations(engine)
 
     # Seed all metros from local data
     session = get_session(engine)
@@ -340,6 +749,27 @@ def init_database(engine=None):
             print(f"Seeded {added} markets from local metro data")
     except Exception as e:
         print(f"Warning: Could not seed metros: {e}")
+        session.rollback()
+    finally:
+        session.close()
+
+    # Seed default loan products
+    session = get_session(engine)
+    try:
+        existing_loan_products = {lp.name for lp in session.query(LoanProductDB).all()}
+        added_lp = 0
+        for lp_data in DEFAULT_LOAN_PRODUCTS:
+            if lp_data["name"] in existing_loan_products:
+                continue
+            loan_product = LoanProductDB(**lp_data)
+            session.add(loan_product)
+            added_lp += 1
+
+        if added_lp > 0:
+            session.commit()
+            print(f"Seeded {added_lp} default loan products")
+    except Exception as e:
+        print(f"Warning: Could not seed loan products: {e}")
         session.rollback()
     finally:
         session.close()

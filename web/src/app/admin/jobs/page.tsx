@@ -19,14 +19,20 @@ import { cn } from "@/lib/utils";
 
 function formatDate(dateStr: string | null): string {
   if (!dateStr) return "-";
-  const date = new Date(dateStr);
+  // API returns UTC timestamps without 'Z' suffix, so append it
+  const utcDateStr = dateStr.endsWith("Z") ? dateStr : dateStr + "Z";
+  const date = new Date(utcDateStr);
   return date.toLocaleString();
 }
 
 function formatDuration(startStr: string | null | undefined, endStr: string | null | undefined): string {
   if (!startStr) return "-";
-  const start = new Date(startStr);
-  const end = endStr ? new Date(endStr) : new Date();
+  // API returns UTC timestamps without 'Z' suffix
+  const startUtc = startStr.endsWith("Z") ? startStr : startStr + "Z";
+  const start = new Date(startUtc);
+  const end = endStr
+    ? new Date(endStr.endsWith("Z") ? endStr : endStr + "Z")
+    : new Date();
   const seconds = Math.round((end.getTime() - start.getTime()) / 1000);
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);

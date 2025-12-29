@@ -20,9 +20,14 @@ web:  ## Run web frontend
 
 test:  ## Run tests
 	pytest tests/ -v
+	@python scripts/cleanup_test_data.py 2>/dev/null || true
 
 test-cov:  ## Run tests with coverage
 	pytest tests/ --cov=src --cov-report=html
+	@python scripts/cleanup_test_data.py 2>/dev/null || true
+
+cleanup-test-data:  ## Clean up test data from the database
+	python scripts/cleanup_test_data.py
 
 lint:  ## Run linters
 	ruff check src/ api/

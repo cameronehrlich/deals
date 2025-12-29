@@ -5,6 +5,7 @@ from typing import Optional, List
 import json
 
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from src.db.repository import DealRepository
 from src.db.models import (
@@ -379,9 +380,10 @@ class SQLiteRepository(DealRepository):
         """Update which APIs support this market."""
         market = self.session.query(MarketDB).filter_by(id=market_id).first()
         if market:
-            api_support = market.api_support or {}
+            api_support = dict(market.api_support or {})
             api_support[provider] = supported
             market.api_support = api_support
+            flag_modified(market, "api_support")
             self.session.commit()
         return market
 
@@ -564,12 +566,17 @@ class SQLiteRepository(DealRepository):
 
     def cleanup_old_jobs(self, days: int = 7) -> int:
         """Delete completed/failed/cancelled jobs older than N days."""
+        from sqlalchemy import or_
         cutoff = datetime.utcnow() - timedelta(days=days)
         deleted = (
             self.session.query(JobDB)
             .filter(
                 JobDB.status.in_(['completed', 'failed', 'cancelled']),
-                JobDB.completed_at < cutoff
+                or_(
+                    JobDB.completed_at < cutoff,
+                    # Fallback to created_at if completed_at is NULL
+                    (JobDB.completed_at.is_(None)) & (JobDB.created_at < cutoff)
+                )
             )
             .delete(synchronize_session=False)
         )
@@ -649,11 +656,26 @@ class SQLiteRepository(DealRepository):
 
 # Singleton instance
 _repository: Optional[SQLiteRepository] = None
+_test_db_path: Optional[str] = None
 
 
 def get_repository() -> SQLiteRepository:
     """Get or create the SQLite repository singleton."""
-    global _repository
+    global _repository, _test_db_path
     if _repository is None:
-        _repository = SQLiteRepository()
+        _repository = SQLiteRepository(db_path=_test_db_path)
     return _repository
+
+
+def reset_repository() -> None:
+    """Reset the repository singleton. Used for testing."""
+    global _repository
+    if _repository is not None:
+        _repository.close()
+        _repository = None
+
+
+def set_test_db_path(db_path: Optional[str]) -> None:
+    """Set the database path for testing. Call reset_repository() after to apply."""
+    global _test_db_path
+    _test_db_path = db_path

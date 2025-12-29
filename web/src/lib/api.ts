@@ -412,6 +412,22 @@ export interface SavedProperty {
   // Full analysis data (JSON blob from job)
   analysis_data?: Record<string, unknown>;
 
+  // Deal pipeline data
+  deal_data?: {
+    stage?: string;
+    stage_updated_at?: string;
+    stage_history?: Array<{
+      stage: string;
+      entered_at: string;
+      notes?: string;
+    }>;
+    due_diligence?: Record<string, {
+      completed: boolean;
+      notes?: string;
+      completed_date?: string;
+    }>;
+  };
+
   // Pipeline
   pipeline_status: string;
   is_favorite: boolean;
@@ -816,7 +832,7 @@ class ApiClient {
     });
   }
 
-  async reenrichProperty(propertyId: string): Promise<SavedProperty> {
+  async reenrichProperty(propertyId: string): Promise<{ job_id: string; property_id: string; message: string }> {
     return this.fetch(`/api/saved/properties/${propertyId}/reenrich`, {
       method: "POST",
     });
@@ -1012,6 +1028,441 @@ class ApiClient {
       body: JSON.stringify(params),
     });
   }
+
+  // ==================== Financing Methods ====================
+
+  async getLoanProducts(params?: {
+    defaults_only?: boolean;
+    loan_type?: string;
+  }): Promise<LoanProduct[]> {
+    const searchParams = new URLSearchParams();
+    if (params?.defaults_only) searchParams.set("defaults_only", "true");
+    if (params?.loan_type) searchParams.set("loan_type", params.loan_type);
+    return this.fetch(`/api/financing/loan-products?${searchParams}`);
+  }
+
+  async getLoanProduct(productId: string): Promise<LoanProduct> {
+    return this.fetch(`/api/financing/loan-products/${productId}`);
+  }
+
+  async createLoanProduct(
+    data: Omit<LoanProduct, "id" | "created_at" | "updated_at">
+  ): Promise<LoanProduct> {
+    return this.fetch("/api/financing/loan-products", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateLoanProduct(
+    productId: string,
+    data: Partial<LoanProduct>
+  ): Promise<LoanProduct> {
+    return this.fetch(`/api/financing/loan-products/${productId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteLoanProduct(
+    productId: string
+  ): Promise<{ success: boolean; message: string }> {
+    return this.fetch(`/api/financing/loan-products/${productId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async calculateFinancingScenario(params: {
+    purchase_price: number;
+    monthly_rent: number;
+    down_payment_pct?: number;
+    interest_rate?: number;
+    loan_term_years?: number;
+    closing_cost_pct?: number;
+    points?: number;
+    property_tax_rate?: number;
+    insurance_rate?: number;
+    vacancy_rate?: number;
+    maintenance_rate?: number;
+    capex_rate?: number;
+    property_management_rate?: number;
+    hoa_monthly?: number;
+  }): Promise<FinancingScenario> {
+    return this.fetch("/api/financing/calculate", {
+      method: "POST",
+      body: JSON.stringify(params),
+    });
+  }
+
+  async compareFinancingScenarios(params: {
+    purchase_price: number;
+    monthly_rent: number;
+    loan_product_ids?: string[];
+    property_tax_rate?: number;
+    insurance_rate?: number;
+    vacancy_rate?: number;
+    maintenance_rate?: number;
+    capex_rate?: number;
+    property_management_rate?: number;
+    hoa_monthly?: number;
+  }): Promise<FinancingScenario[]> {
+    return this.fetch("/api/financing/compare", {
+      method: "POST",
+      body: JSON.stringify(params),
+    });
+  }
+
+  async calculateBreakEven(params: {
+    purchase_price: number;
+    monthly_rent: number;
+    down_payment_pct?: number;
+    interest_rate?: number;
+    loan_term_years?: number;
+    closing_cost_pct?: number;
+    target_cash_on_cash?: number;
+    target_cash_flow?: number;
+  }): Promise<BreakEvenAnalysis> {
+    return this.fetch("/api/financing/break-even", {
+      method: "POST",
+      body: JSON.stringify(params),
+    });
+  }
+
+  async checkDSCR(params: {
+    purchase_price: number;
+    monthly_rent: number;
+    down_payment_pct?: number;
+    interest_rate?: number;
+    loan_term_years?: number;
+    min_dscr_required?: number;
+  }): Promise<DSCRCheck> {
+    const searchParams = new URLSearchParams();
+    searchParams.set("purchase_price", params.purchase_price.toString());
+    searchParams.set("monthly_rent", params.monthly_rent.toString());
+    if (params.down_payment_pct)
+      searchParams.set("down_payment_pct", params.down_payment_pct.toString());
+    if (params.interest_rate)
+      searchParams.set("interest_rate", params.interest_rate.toString());
+    if (params.loan_term_years)
+      searchParams.set("loan_term_years", params.loan_term_years.toString());
+    if (params.min_dscr_required)
+      searchParams.set("min_dscr_required", params.min_dscr_required.toString());
+    return this.fetch(`/api/financing/dscr-check?${searchParams}`);
+  }
+
+  // ==================== Contact Methods ====================
+
+  async getContacts(params?: {
+    contact_type?: string;
+    property_id?: string;
+    search?: string;
+    has_followup?: boolean;
+  }): Promise<Contact[]> {
+    const searchParams = new URLSearchParams();
+    if (params?.contact_type) searchParams.set("contact_type", params.contact_type);
+    if (params?.property_id) searchParams.set("property_id", params.property_id);
+    if (params?.search) searchParams.set("search", params.search);
+    if (params?.has_followup !== undefined)
+      searchParams.set("has_followup", params.has_followup.toString());
+    return this.fetch(`/api/contacts?${searchParams}`);
+  }
+
+  async getContact(contactId: string): Promise<Contact> {
+    return this.fetch(`/api/contacts/${contactId}`);
+  }
+
+  async createContact(data: CreateContactRequest): Promise<Contact> {
+    return this.fetch("/api/contacts", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateContact(contactId: string, data: Partial<Contact>): Promise<Contact> {
+    return this.fetch(`/api/contacts/${contactId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteContact(contactId: string): Promise<{ success: boolean; message: string }> {
+    return this.fetch(`/api/contacts/${contactId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async linkPropertyToContact(
+    contactId: string,
+    propertyId: string
+  ): Promise<Contact> {
+    return this.fetch(
+      `/api/contacts/${contactId}/link-property?property_id=${propertyId}`,
+      { method: "POST" }
+    );
+  }
+
+  async getCommunications(params?: {
+    contact_id?: string;
+    property_id?: string;
+    comm_type?: string;
+    limit?: number;
+  }): Promise<Communication[]> {
+    const searchParams = new URLSearchParams();
+    if (params?.contact_id) searchParams.set("contact_id", params.contact_id);
+    if (params?.property_id) searchParams.set("property_id", params.property_id);
+    if (params?.comm_type) searchParams.set("comm_type", params.comm_type);
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    return this.fetch(`/api/contacts/communications?${searchParams}`);
+  }
+
+  async createCommunication(data: CreateCommunicationRequest): Promise<Communication> {
+    return this.fetch("/api/contacts/communications", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getEmailTemplates(): Promise<EmailTemplate[]> {
+    return this.fetch("/api/contacts/templates");
+  }
+
+  async generateEmail(
+    templateId: string,
+    variables: Record<string, string>
+  ): Promise<GeneratedEmail> {
+    return this.fetch(`/api/contacts/templates/${templateId}/generate`, {
+      method: "POST",
+      body: JSON.stringify({ template_id: templateId, variables }),
+    });
+  }
+
+  async getPropertyTimeline(propertyId: string): Promise<PropertyTimeline> {
+    return this.fetch(`/api/contacts/properties/${propertyId}/timeline`);
+  }
+
+  // ==================== Pipeline Methods ====================
+
+  async getOffers(params?: {
+    property_id?: string;
+    status?: string;
+  }): Promise<Offer[]> {
+    const searchParams = new URLSearchParams();
+    if (params?.property_id) searchParams.set("property_id", params.property_id);
+    if (params?.status) searchParams.set("status", params.status);
+    return this.fetch(`/api/pipeline/offers?${searchParams}`);
+  }
+
+  async getOffer(offerId: string): Promise<Offer> {
+    return this.fetch(`/api/pipeline/offers/${offerId}`);
+  }
+
+  async createOffer(data: CreateOfferRequest): Promise<Offer> {
+    return this.fetch("/api/pipeline/offers", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateOffer(offerId: string, data: UpdateOfferRequest): Promise<Offer> {
+    return this.fetch(`/api/pipeline/offers/${offerId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async submitOffer(offerId: string): Promise<Offer> {
+    return this.fetch(`/api/pipeline/offers/${offerId}/submit`, {
+      method: "POST",
+    });
+  }
+
+  async logCounterOffer(
+    offerId: string,
+    counterPrice: number,
+    notes?: string
+  ): Promise<Offer> {
+    return this.fetch(`/api/pipeline/offers/${offerId}/counter`, {
+      method: "POST",
+      body: JSON.stringify({ counter_price: counterPrice, notes }),
+    });
+  }
+
+  async acceptOffer(offerId: string, finalPrice?: number): Promise<Offer> {
+    const searchParams = new URLSearchParams();
+    if (finalPrice) searchParams.set("final_price", finalPrice.toString());
+    return this.fetch(`/api/pipeline/offers/${offerId}/accept?${searchParams}`, {
+      method: "POST",
+    });
+  }
+
+  async rejectOffer(offerId: string, notes?: string): Promise<Offer> {
+    const searchParams = new URLSearchParams();
+    if (notes) searchParams.set("notes", notes);
+    return this.fetch(`/api/pipeline/offers/${offerId}/reject?${searchParams}`, {
+      method: "POST",
+    });
+  }
+
+  async withdrawOffer(offerId: string, notes?: string): Promise<Offer> {
+    const searchParams = new URLSearchParams();
+    if (notes) searchParams.set("notes", notes);
+    return this.fetch(`/api/pipeline/offers/${offerId}/withdraw?${searchParams}`, {
+      method: "POST",
+    });
+  }
+
+  async deleteOffer(offerId: string): Promise<{ success: boolean }> {
+    return this.fetch(`/api/pipeline/offers/${offerId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async getDealStages(): Promise<DealStage[]> {
+    return this.fetch("/api/pipeline/stages");
+  }
+
+  async getDueDiligenceItems(): Promise<DueDiligenceItem[]> {
+    return this.fetch("/api/pipeline/due-diligence-items");
+  }
+
+  async updatePropertyStage(
+    propertyId: string,
+    stage: string,
+    notes?: string
+  ): Promise<{ success: boolean; property_id: string; stage: string }> {
+    return this.fetch(`/api/pipeline/properties/${propertyId}/stage`, {
+      method: "PATCH",
+      body: JSON.stringify({ stage, notes }),
+    });
+  }
+
+  async getPropertyDueDiligence(propertyId: string): Promise<DueDiligenceChecklist> {
+    return this.fetch(`/api/pipeline/properties/${propertyId}/due-diligence`);
+  }
+
+  async updatePropertyDueDiligence(
+    propertyId: string,
+    itemId: string,
+    completed: boolean,
+    notes?: string
+  ): Promise<{ success: boolean; item_id: string; completed: boolean }> {
+    return this.fetch(`/api/pipeline/properties/${propertyId}/due-diligence`, {
+      method: "PATCH",
+      body: JSON.stringify({ item_id: itemId, completed, notes }),
+    });
+  }
+
+  async getPipelineOverview(): Promise<PipelineOverview> {
+    return this.fetch("/api/pipeline/overview");
+  }
+
+  // ==================== Financing Desk Methods ====================
+
+  async getBorrowerProfile(): Promise<any> {
+    return this.fetch("/api/financing-desk/borrower-profile");
+  }
+
+  async saveBorrowerProfile(data: Record<string, any>): Promise<any> {
+    return this.fetch("/api/financing-desk/borrower-profile", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getLenders(params?: { lender_type?: string; is_active?: boolean }): Promise<any[]> {
+    const searchParams = new URLSearchParams();
+    if (params?.lender_type) searchParams.set("lender_type", params.lender_type);
+    if (params?.is_active !== undefined) searchParams.set("is_active", String(params.is_active));
+    return this.fetch(`/api/financing-desk/lenders?${searchParams}`);
+  }
+
+  async getLender(lenderId: string): Promise<any> {
+    return this.fetch(`/api/financing-desk/lenders/${lenderId}`);
+  }
+
+  async createLender(data: {
+    name: string;
+    lender_type: string;
+    contact_name?: string;
+    contact_email?: string;
+    contact_phone?: string;
+    website?: string;
+    loan_types?: string[];
+    min_credit_score?: number;
+    min_down_payment?: number;
+    max_ltv?: number;
+    rate_range_low?: number;
+    rate_range_high?: number;
+    notes?: string;
+    is_active?: boolean;
+  }): Promise<any> {
+    return this.fetch("/api/financing-desk/lenders", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateLender(lenderId: string, data: Record<string, any>): Promise<any> {
+    return this.fetch(`/api/financing-desk/lenders/${lenderId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteLender(lenderId: string): Promise<{ success: boolean }> {
+    return this.fetch(`/api/financing-desk/lenders/${lenderId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async getLenderQuotes(params?: {
+    lender_id?: string;
+    property_id?: string;
+    status?: string;
+  }): Promise<any[]> {
+    const searchParams = new URLSearchParams();
+    if (params?.lender_id) searchParams.set("lender_id", params.lender_id);
+    if (params?.property_id) searchParams.set("property_id", params.property_id);
+    if (params?.status) searchParams.set("status", params.status);
+    return this.fetch(`/api/financing-desk/quotes?${searchParams}`);
+  }
+
+  async createLenderQuote(data: {
+    lender_id: string;
+    property_id?: string;
+    loan_amount: number;
+    interest_rate: number;
+    loan_term_years: number;
+    points?: number;
+    origination_fee?: number;
+    closing_costs?: number;
+    monthly_payment?: number;
+    apr?: number;
+    rate_lock_days?: number;
+    notes?: string;
+  }): Promise<any> {
+    return this.fetch("/api/financing-desk/quotes", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateLenderQuote(quoteId: string, data: Record<string, any>): Promise<any> {
+    return this.fetch(`/api/financing-desk/quotes/${quoteId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteLenderQuote(quoteId: string): Promise<{ success: boolean }> {
+    return this.fetch(`/api/financing-desk/quotes/${quoteId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async compareQuotes(propertyId: string): Promise<any> {
+    return this.fetch(`/api/financing-desk/quotes/compare/${propertyId}`);
+  }
 }
 
 // Job types
@@ -1155,6 +1606,271 @@ export interface AllLocationDataResponse {
   };
   // Errors from individual API calls
   errors: string[];
+}
+
+// ==================== Financing Types ====================
+
+export interface LoanProduct {
+  id: string;
+  name: string;
+  description?: string;
+  down_payment_pct: number;
+  interest_rate: number;
+  loan_term_years: number;
+  points: number;
+  closing_cost_pct: number;
+  is_dscr: boolean;
+  min_dscr_required?: number;
+  loan_type?: string;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FinancingScenario {
+  // Input summary
+  purchase_price: number;
+  monthly_rent: number;
+  down_payment_pct: number;
+  interest_rate: number;
+  loan_term_years: number;
+
+  // Cash needed
+  down_payment: number;
+  closing_costs: number;
+  points_cost: number;
+  total_cash_needed: number;
+
+  // Loan details
+  loan_amount: number;
+  monthly_mortgage: number;
+
+  // Operating expenses (monthly)
+  monthly_taxes: number;
+  monthly_insurance: number;
+  monthly_vacancy: number;
+  monthly_maintenance: number;
+  monthly_capex: number;
+  monthly_property_management: number;
+  monthly_hoa: number;
+  total_monthly_expenses: number;
+
+  // Performance metrics
+  monthly_cash_flow: number;
+  annual_cash_flow: number;
+  cash_on_cash_return: number;
+  cap_rate: number;
+  gross_rent_multiplier: number;
+  rent_to_price_ratio: number;
+  break_even_occupancy: number;
+
+  // DSCR
+  dscr: number;
+  qualifies_for_dscr: boolean;
+  dscr_status: 'qualifies' | 'borderline' | 'does_not_qualify';
+}
+
+export interface BreakEvenAnalysis {
+  current_cash_flow: number;
+  current_coc: number;
+  break_even_rate?: number;
+  rate_cushion?: number;
+  break_even_vacancy?: number;
+  vacancy_cushion?: number;
+  break_even_rent?: number;
+  rent_cushion_pct?: number;
+  price_for_target_coc?: number;
+  down_payment_for_target_coc?: number;
+  rate_for_target_cash_flow?: number;
+}
+
+export interface DSCRCheck {
+  dscr: number;
+  min_required: number;
+  qualifies: boolean;
+  status: string;
+  shortfall: number;
+  monthly_cash_flow: number;
+  suggestions: string[];
+}
+
+// ==================== Contact Types ====================
+
+export interface Contact {
+  id: string;
+  name: string;
+  email?: string;
+  phone?: string;
+  company?: string;
+  contact_type?: string; // listing_agent, buyer_agent, seller, lender, other
+  notes?: string;
+  property_ids: string[];
+  agent_id?: string;
+  agent_photo_url?: string;
+  agent_profile_data?: Record<string, unknown>;
+  last_contacted?: string;
+  next_followup?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateContactRequest {
+  name: string;
+  email?: string;
+  phone?: string;
+  company?: string;
+  contact_type?: string;
+  notes?: string;
+  property_ids?: string[];
+  agent_id?: string;
+  agent_photo_url?: string;
+  agent_profile_data?: Record<string, unknown>;
+}
+
+export interface Communication {
+  id: string;
+  contact_id: string;
+  property_id?: string;
+  comm_type: string; // email, call, text, meeting, note
+  direction?: string; // inbound, outbound, internal
+  subject?: string;
+  content?: string;
+  template_used?: string;
+  occurred_at: string;
+  created_at: string;
+}
+
+export interface CreateCommunicationRequest {
+  contact_id: string;
+  property_id?: string;
+  comm_type: string;
+  direction?: string;
+  subject?: string;
+  content?: string;
+  template_used?: string;
+  occurred_at?: string;
+}
+
+export interface EmailTemplate {
+  id: string;
+  name: string;
+  description: string;
+  subject: string;
+  body: string;
+  variables: string[];
+}
+
+export interface GeneratedEmail {
+  subject: string;
+  body: string;
+}
+
+export interface PropertyTimeline {
+  property_id: string;
+  contacts: Contact[];
+  communications: Communication[];
+  total_contacts: number;
+  total_communications: number;
+}
+
+// ==================== Pipeline Types ====================
+
+export interface Offer {
+  id: string;
+  property_id: string;
+  offer_price: number;
+  down_payment_pct: number;
+  financing_type?: string;
+  earnest_money?: number;
+  contingencies: string[];
+  inspection_days?: number;
+  financing_days?: number;
+  closing_days?: number;
+  status: 'draft' | 'submitted' | 'countered' | 'accepted' | 'rejected' | 'withdrawn' | 'expired';
+  submitted_at?: string;
+  expires_at?: string;
+  response_deadline?: string;
+  counter_history: Array<{
+    price: number;
+    date: string;
+    notes?: string;
+  }>;
+  final_price?: number;
+  outcome_notes?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateOfferRequest {
+  property_id: string;
+  offer_price: number;
+  down_payment_pct?: number;
+  financing_type?: string;
+  earnest_money?: number;
+  contingencies?: string[];
+  inspection_days?: number;
+  financing_days?: number;
+  closing_days?: number;
+}
+
+export interface UpdateOfferRequest {
+  offer_price?: number;
+  down_payment_pct?: number;
+  financing_type?: string;
+  earnest_money?: number;
+  contingencies?: string[];
+  inspection_days?: number;
+  financing_days?: number;
+  closing_days?: number;
+  status?: string;
+  expires_at?: string;
+  response_deadline?: string;
+  final_price?: number;
+  outcome_notes?: string;
+}
+
+export interface DealStage {
+  id: string;
+  name: string;
+  order: number;
+}
+
+export interface DueDiligenceItem {
+  id: string;
+  name: string;
+  category: string;
+  completed: boolean;
+  notes?: string;
+  completed_date?: string;
+}
+
+export interface DueDiligenceChecklist {
+  property_id: string;
+  items: DueDiligenceItem[];
+  completed_count: number;
+  total_count: number;
+}
+
+export interface PipelineProperty {
+  id: string;
+  address: string;
+  city: string;
+  state: string;
+  list_price?: number;
+  estimated_rent?: number;
+  deal_stage?: string;
+  deal_score?: number;
+  days_in_stage?: number;
+  has_active_offer: boolean;
+  primary_photo?: string;
+}
+
+export interface PipelineOverview {
+  stages: DealStage[];
+  properties_by_stage: Record<string, PipelineProperty[]>;
+  total_properties: number;
+  active_offers: number;
+  under_contract: number;
 }
 
 export const api = new ApiClient();
