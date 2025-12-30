@@ -199,8 +199,8 @@ fly deploy
 - [x] Phase 3: Live Data Integration (US Real Estate API, income data)
 - [x] Phase 4: Persistence (SQLite, saved properties, market favorites)
 - [x] Phase 5: Transaction Pipeline (financing, outreach, offers)
-- [ ] Phase 6: Enhanced Analysis (comp analysis, neighborhood scoring) ← **Next**
-- [ ] Phase 7: Alerts & Monitoring (new listing notifications)
+- [x] Phase 6: Enhanced Analysis (comp analysis, neighborhood scoring)
+- [ ] Phase 7: Alerts & Monitoring (new listing notifications) ← **Next**
 
 ---
 
