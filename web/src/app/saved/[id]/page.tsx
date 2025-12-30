@@ -61,6 +61,7 @@ import { ImageCarousel } from "@/components/ImageCarousel";
 import { FinancingComparison } from "@/components/FinancingComparison";
 import { ContactsPanel } from "@/components/ContactsPanel";
 import { CompsPanel } from "@/components/CompsPanel";
+import { NeighborhoodScorePanel } from "@/components/NeighborhoodScorePanel";
 
 export default function SavedPropertyDetailPage({
   params,
@@ -1297,6 +1298,9 @@ export default function SavedPropertyDetailPage({
             subjectPrice={offerPrice ?? savedProperty.list_price}
             subjectSqft={savedProperty.sqft}
           />
+
+          {/* Neighborhood Score */}
+          <NeighborhoodScorePanel propertyId={propertyId} />
 
           {/* Location Insights Loading State */}
           {locationLoading && !locationData && savedProperty.latitude && savedProperty.longitude && (

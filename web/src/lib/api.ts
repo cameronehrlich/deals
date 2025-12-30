@@ -1493,6 +1493,24 @@ class ApiClient {
     if (params.max_results) searchParams.set("max_results", params.max_results.toString());
     return this.fetch(`/api/comps/sold?${searchParams}`);
   }
+
+  // ==================== Neighborhood Score Methods (Phase 6.2) ====================
+
+  async getNeighborhoodScoreForProperty(propertyId: string): Promise<NeighborhoodScore> {
+    return this.fetch(`/api/neighborhood/score/${propertyId}`);
+  }
+
+  async getNeighborhoodScoreByLocation(
+    latitude: number,
+    longitude: number,
+    zipCode?: string
+  ): Promise<NeighborhoodScore> {
+    const params = new URLSearchParams();
+    params.set("latitude", latitude.toString());
+    params.set("longitude", longitude.toString());
+    if (zipCode) params.set("zip_code", zipCode);
+    return this.fetch(`/api/neighborhood/score?${params}`);
+  }
 }
 
 // ==================== Comps Types (Phase 6) ====================
@@ -1529,6 +1547,41 @@ export interface CompsAnalysis {
   price_vs_median_psf?: number;
   price_position: "above_market" | "below_market" | "at_market" | "unknown";
   comparables: ComparableSale[];
+}
+
+// ==================== Neighborhood Score Types (Phase 6.2) ====================
+
+export interface LocationScore {
+  score?: number;
+  weight: number;
+  description?: string;
+  raw_value?: number;
+}
+
+export interface SchoolSummary {
+  count: number;
+  avg_rating?: number;
+  top_rated?: string;
+  public_count: number;
+  private_count: number;
+}
+
+export interface NeighborhoodScore {
+  overall_score?: number;
+  grade: string;
+  walkability: LocationScore;
+  transit: LocationScore;
+  bikeability: LocationScore;
+  schools: LocationScore;
+  safety: LocationScore;
+  flood_risk: LocationScore;
+  school_summary: SchoolSummary;
+  address?: string;
+  city?: string;
+  state?: string;
+  zip_code?: string;
+  data_sources_used: string[];
+  data_completeness: number;
 }
 
 // Job types
