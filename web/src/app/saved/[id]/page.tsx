@@ -62,6 +62,7 @@ import { FinancingComparison } from "@/components/FinancingComparison";
 import { ContactsPanel } from "@/components/ContactsPanel";
 import { CompsPanel } from "@/components/CompsPanel";
 import { NeighborhoodScorePanel } from "@/components/NeighborhoodScorePanel";
+import { RiskAssessmentPanel } from "@/components/RiskAssessmentPanel";
 
 export default function SavedPropertyDetailPage({
   params,
@@ -1301,6 +1302,9 @@ export default function SavedPropertyDetailPage({
 
           {/* Neighborhood Score */}
           <NeighborhoodScorePanel propertyId={propertyId} />
+
+          {/* Risk Assessment */}
+          <RiskAssessmentPanel propertyId={propertyId} />
 
           {/* Location Insights Loading State */}
           {locationLoading && !locationData && savedProperty.latitude && savedProperty.longitude && (

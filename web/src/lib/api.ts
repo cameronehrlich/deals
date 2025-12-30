@@ -1511,6 +1511,12 @@ class ApiClient {
     if (zipCode) params.set("zip_code", zipCode);
     return this.fetch(`/api/neighborhood/score?${params}`);
   }
+
+  // ==================== Risk Assessment Methods (Phase 6.3) ====================
+
+  async getRiskAssessment(propertyId: string): Promise<RiskAssessment> {
+    return this.fetch(`/api/risk/assessment/${propertyId}`);
+  }
 }
 
 // ==================== Comps Types (Phase 6) ====================
@@ -1582,6 +1588,34 @@ export interface NeighborhoodScore {
   zip_code?: string;
   data_sources_used: string[];
   data_completeness: number;
+}
+
+// ==================== Risk Assessment Types (Phase 6.3) ====================
+
+export interface RiskFlag {
+  category: "property" | "market" | "location" | "financial";
+  severity: "low" | "medium" | "high" | "critical";
+  title: string;
+  description: string;
+  recommendation?: string;
+}
+
+export interface RiskAssessment {
+  risk_level: "low" | "medium" | "high" | "critical" | "unknown";
+  risk_score: number;
+  property_flags: RiskFlag[];
+  market_flags: RiskFlag[];
+  location_flags: RiskFlag[];
+  financial_flags: RiskFlag[];
+  total_flags: number;
+  critical_count: number;
+  high_count: number;
+  medium_count: number;
+  low_count: number;
+  deal_breakers: string[];
+  investigate: string[];
+  minor_concerns: string[];
+  due_diligence_items: string[];
 }
 
 // Job types
