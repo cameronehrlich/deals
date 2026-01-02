@@ -403,10 +403,121 @@ class JobHandlers:
             repo.close()
 
 
+    @staticmethod
+    async def due_diligence(job: JobDB) -> dict:
+        """
+        Run comprehensive AI due diligence research on a property.
+
+        Uses Claude with web search to research:
+        - Property history and ownership
+        - Legal and regulatory issues
+        - Environmental and safety concerns
+        - Market and neighborhood context
+        - Professional contacts
+
+        Payload:
+            property_id: str - The property ID to research
+        """
+        from src.agents.due_diligence import DueDiligenceAgent
+        from src.db.models import SavedPropertyDB
+        from datetime import datetime
+
+        property_id = job.payload.get("property_id")
+        if not property_id:
+            raise ValueError("property_id is required in payload")
+
+        repo = get_fresh_repository()
+
+        try:
+            # Get property details
+            prop = repo.session.query(SavedPropertyDB).filter_by(id=property_id).first()
+            if not prop:
+                raise ValueError(f"Property not found: {property_id}")
+
+            print(f"[Job] Starting AI due diligence for {prop.address}")
+
+            # Update job status
+            repo.update_job_status(
+                job.id,
+                status="running",
+                message=f"Starting AI research for {prop.address}...",
+                progress=5,
+            )
+
+            # Initialize the report in the database
+            initial_report = {
+                "status": "running",
+                "started_at": datetime.utcnow().isoformat(),
+                "property_address": f"{prop.address}, {prop.city}, {prop.state}",
+            }
+            prop.due_diligence_report = initial_report
+            repo.session.commit()
+
+            # Run the due diligence agent
+            repo.update_job_status(
+                job.id,
+                status="running",
+                message="AI is researching property history...",
+                progress=20,
+            )
+
+            agent = DueDiligenceAgent()
+            result = await agent.run(
+                property_address=prop.address,
+                city=prop.city,
+                state=prop.state,
+                zip_code=prop.zip_code or "",
+                property_id=property_id,
+                list_price=prop.list_price,
+                property_type=prop.property_type,
+                year_built=prop.year_built,
+            )
+
+            repo.update_job_status(
+                job.id,
+                status="running",
+                message="Compiling research findings...",
+                progress=90,
+            )
+
+            # Store the report in the database
+            # Refresh the property in case it was modified
+            repo.session.refresh(prop)
+            prop.due_diligence_report = result.data
+            repo.session.commit()
+
+            if result.success:
+                red_flag_count = len(result.data.get("red_flags", []))
+                print(f"[Job] Due diligence completed for {prop.address}: {red_flag_count} red flags found")
+
+                return {
+                    "property_id": property_id,
+                    "address": prop.address,
+                    "status": "completed",
+                    "red_flag_count": red_flag_count,
+                    "yellow_flag_count": len(result.data.get("yellow_flags", [])),
+                    "green_flag_count": len(result.data.get("green_flags", [])),
+                    "sources_consulted": len(result.data.get("sources_consulted", [])),
+                }
+            else:
+                print(f"[Job] Due diligence failed for {prop.address}: {result.message}")
+                return {
+                    "property_id": property_id,
+                    "address": prop.address,
+                    "status": "failed",
+                    "error": result.message,
+                    "errors": result.errors,
+                }
+
+        finally:
+            repo.close()
+
+
 # Map job types to handlers
 JOB_HANDLERS = {
     "enrich_market": JobHandlers.enrich_market,
     "enrich_property": JobHandlers.enrich_property,
+    "due_diligence": JobHandlers.due_diligence,
 }
 
 

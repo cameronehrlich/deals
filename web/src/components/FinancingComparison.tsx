@@ -21,7 +21,7 @@ import {
   ChevronUp,
   Info,
 } from "lucide-react";
-import { api, LoanProduct, FinancingScenario } from "@/lib/api";
+import { api, FinancingScenario } from "@/lib/api";
 import { cn, formatCurrency, formatPercent, getCashFlowColor } from "@/lib/utils";
 
 interface FinancingComparisonProps {
@@ -30,7 +30,7 @@ interface FinancingComparisonProps {
   propertyTaxRate?: number;
   insuranceRate?: number;
   hoaMonthly?: number;
-  onScenarioSelect?: (scenario: FinancingScenario, product: LoanProduct) => void;
+  onScenarioSelect?: (scenario: FinancingScenario) => void;
 }
 
 export function FinancingComparison({
@@ -41,27 +41,23 @@ export function FinancingComparison({
   hoaMonthly = 0,
   onScenarioSelect,
 }: FinancingComparisonProps) {
-  const [loanProducts, setLoanProducts] = useState<LoanProduct[]>([]);
   const [scenarios, setScenarios] = useState<FinancingScenario[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(true);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
 
-  // Fetch loan products and calculate scenarios
+  // Fetch and calculate financing scenarios
   useEffect(() => {
-    async function fetchAndCalculate() {
+    async function fetchScenarios() {
       if (!purchasePrice || !monthlyRent) return;
 
       try {
         setLoading(true);
         setError(null);
 
-        // Fetch default loan products
-        const products = await api.getLoanProducts({ defaults_only: true });
-        setLoanProducts(products);
-
-        // Calculate scenarios for each product
+        // Calculate scenarios for each default loan product
+        // (API returns product info embedded in each scenario)
         const calculatedScenarios = await api.compareFinancingScenarios({
           purchase_price: purchasePrice,
           monthly_rent: monthlyRent,
@@ -79,7 +75,7 @@ export function FinancingComparison({
       }
     }
 
-    fetchAndCalculate();
+    fetchScenarios();
   }, [purchasePrice, monthlyRent, propertyTaxRate, insuranceRate, hoaMonthly]);
 
   const handleRefresh = async () => {
@@ -102,8 +98,8 @@ export function FinancingComparison({
 
   const handleSelectScenario = (index: number) => {
     setSelectedIndex(index);
-    if (onScenarioSelect && scenarios[index] && loanProducts[index]) {
-      onScenarioSelect(scenarios[index], loanProducts[index]);
+    if (onScenarioSelect && scenarios[index]) {
+      onScenarioSelect(scenarios[index]);
     }
   };
 
@@ -205,9 +201,6 @@ export function FinancingComparison({
                   </thead>
                   <tbody>
                     {scenarios.map((scenario, index) => {
-                      const product = loanProducts[index];
-                      if (!product) return null;
-
                       const isBestCashFlow = scenario.monthly_cash_flow === bestCashFlow && bestCashFlow > 0;
                       const isBestCoC = scenario.cash_on_cash_return === bestCoC && bestCoC > 0;
                       const isLowestCash = scenario.total_cash_needed === lowestCashNeeded;
@@ -215,7 +208,7 @@ export function FinancingComparison({
 
                       return (
                         <tr
-                          key={product.id}
+                          key={scenario.product_id || index}
                           onClick={() => handleSelectScenario(index)}
                           className={cn(
                             "border-b last:border-0 cursor-pointer transition-colors",
@@ -226,19 +219,14 @@ export function FinancingComparison({
                         >
                           <td className="py-3 px-3">
                             <div className="font-medium text-gray-900">
-                              {product.name}
+                              {scenario.product_name || "Unknown"}
                             </div>
-                            {product.description && (
-                              <div className="text-xs text-gray-500 mt-0.5">
-                                {product.description}
-                              </div>
-                            )}
                           </td>
                           <td className="py-3 px-3 text-right">
-                            {formatPercent(product.down_payment_pct)}
+                            {formatPercent(scenario.down_payment_pct)}
                           </td>
                           <td className="py-3 px-3 text-right">
-                            {formatPercent(product.interest_rate)}
+                            {formatPercent(scenario.interest_rate)}
                           </td>
                           <td className="py-3 px-3 text-right">
                             <span className={cn(isLowestCash && "text-green-600 font-medium")}>
@@ -285,7 +273,7 @@ export function FinancingComparison({
                             </span>
                           </td>
                           <td className="py-3 px-3 text-center">
-                            {product.loan_type === "cash" ? (
+                            {scenario.loan_type === "cash" ? (
                               <span className="badge-blue text-xs">Cash</span>
                             ) : scenario.monthly_cash_flow >= 0 ? (
                               scenario.dscr_status === "qualifies" ? (
@@ -330,7 +318,7 @@ export function FinancingComparison({
                 <div className="mt-4 pt-4 border-t">
                   <h4 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
                     <Info className="h-4 w-4 text-primary-600" />
-                    {loanProducts[selectedIndex]?.name} - Details
+                    {scenarios[selectedIndex].product_name} - Details
                   </h4>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     <div className="bg-gray-50 rounded-lg p-3">
@@ -389,7 +377,7 @@ export function FinancingComparison({
                   </div>
 
                   {/* DSCR Status for DSCR loans */}
-                  {loanProducts[selectedIndex]?.is_dscr && (
+                  {scenarios[selectedIndex]?.is_dscr && (
                     <div
                       className={cn(
                         "mt-3 p-3 rounded-lg",
@@ -411,11 +399,6 @@ export function FinancingComparison({
                         <div>
                           <p className="font-medium">
                             DSCR: {scenarios[selectedIndex].dscr.toFixed(2)}
-                            {loanProducts[selectedIndex].min_dscr_required && (
-                              <span className="text-gray-500 ml-1">
-                                (min: {loanProducts[selectedIndex].min_dscr_required})
-                              </span>
-                            )}
                           </p>
                           <p className="text-sm text-gray-600">
                             {scenarios[selectedIndex].dscr_status === "qualifies"

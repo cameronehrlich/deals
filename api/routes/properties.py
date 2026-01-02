@@ -37,6 +37,7 @@ class PropertyListingResponse(BaseModel):
     hoa_fee: Optional[float] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+    description: Optional[str] = None
 
 
 class ApiUsageResponse(BaseModel):
@@ -95,6 +96,7 @@ def _listing_to_response(listing: PropertyListing) -> PropertyListingResponse:
         hoa_fee=listing.hoa_fee,
         latitude=listing.latitude,
         longitude=listing.longitude,
+        description=listing.description,
     )
 
 

@@ -83,6 +83,7 @@ class SavedPropertyDB(Base):
     property_type = Column(String)
     year_built = Column(Integer)
     days_on_market = Column(Integer)
+    description = Column(Text)  # Listing description from agent/seller
 
     # Source
     source = Column(String)  # zillow, redfin, realtor, live_search
@@ -111,6 +112,9 @@ class SavedPropertyDB(Base):
 
     # Deal pipeline data (stage, due diligence checklist, stage history)
     deal_data = Column(JSON)  # {stage, stage_updated_at, stage_history, due_diligence}
+
+    # AI Due Diligence Report (comprehensive research findings)
+    due_diligence_report = Column(JSON)  # {status, started_at, completed_at, findings, red_flags, contacts, ...}
 
     # Pipeline and user data
     pipeline_status = Column(String, default='analyzed')  # new, analyzing, analyzed, shortlisted, rejected
@@ -685,6 +689,14 @@ def _run_migrations(engine):
                 ))
                 connection.commit()
                 print("Migration: Added deal_data column to saved_properties")
+
+            # Migration 2: Add due_diligence_report column
+            if 'due_diligence_report' not in columns:
+                connection.execute(text(
+                    "ALTER TABLE saved_properties ADD COLUMN due_diligence_report JSON"
+                ))
+                connection.commit()
+                print("Migration: Added due_diligence_report column to saved_properties")
 
     except Exception as e:
         print(f"Migration warning: {e}")

@@ -88,6 +88,12 @@ class FinancingScenarioRequest(BaseModel):
 
 class FinancingScenarioResponse(BaseModel):
     """Calculated financing scenario results."""
+    # Loan product info (for reliable matching)
+    product_id: Optional[str] = None
+    product_name: Optional[str] = None
+    loan_type: Optional[str] = None
+    is_dscr: bool = False
+
     # Input summary
     purchase_price: float
     monthly_rent: float
@@ -458,6 +464,11 @@ async def compare_financing_scenarios(request: CompareScenarioRequest):
                 property_management_rate=request.property_management_rate,
                 hoa_monthly=request.hoa_monthly,
             )
+            # Add product info for reliable frontend matching
+            scenario.product_id = product.id
+            scenario.product_name = product.name
+            scenario.loan_type = product.loan_type
+            scenario.is_dscr = product.is_dscr or False
             scenarios.append(scenario)
 
         return scenarios

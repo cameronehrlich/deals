@@ -632,6 +632,7 @@ function AnalyzePageContent() {
         source: result.source || "manual",
         source_url: passedProperty?.source_url || url || undefined,
         photos: passedProperty?.photos,
+        description: passedProperty?.description,
         // All score dimensions
         overall_score: result.deal.score?.overall_score,
         financial_score: result.deal.score?.financial_score,

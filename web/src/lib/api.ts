@@ -278,6 +278,7 @@ export interface PropertyListing {
   price_per_sqft?: number;
   latitude?: number;
   longitude?: number;
+  description?: string;  // Listing description from agent/seller
 }
 
 export interface PropertySearchResponse {
@@ -348,6 +349,7 @@ export interface SavedProperty {
   property_type?: string;
   year_built?: number;
   days_on_market?: number;
+  description?: string;  // Listing description
   photos?: string[];
 
   // Source
@@ -784,6 +786,7 @@ class ApiClient {
     photos?: string[];
     source?: string;
     source_url?: string;
+    description?: string;
     // All score dimensions
     overall_score?: number;
     financial_score?: number;
@@ -1781,6 +1784,12 @@ export interface LoanProduct {
 }
 
 export interface FinancingScenario {
+  // Loan product info (for reliable matching)
+  product_id?: string;
+  product_name?: string;
+  loan_type?: string;
+  is_dscr?: boolean;
+
   // Input summary
   purchase_price: number;
   monthly_rent: number;

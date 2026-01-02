@@ -58,6 +58,7 @@ class SavedPropertyResponse(BaseModel):
     property_type: Optional[str] = None
     year_built: Optional[int] = None
     days_on_market: Optional[int] = None
+    description: Optional[str] = None  # Listing description
 
     # Source
     source: Optional[str] = None
@@ -137,6 +138,7 @@ class SavePropertyRequest(BaseModel):
     property_type: Optional[str] = None
     year_built: Optional[int] = None
     days_on_market: Optional[int] = None
+    description: Optional[str] = None  # Listing description from agent/seller
 
     # Source
     source: Optional[str] = None
@@ -200,6 +202,7 @@ def build_property_response(p) -> SavedPropertyResponse:
         property_type=p.property_type,
         year_built=getattr(p, 'year_built', None),
         days_on_market=getattr(p, 'days_on_market', None),
+        description=getattr(p, 'description', None),
         source=p.source,
         source_url=p.source_url,
         photos=getattr(p, 'photos', None),
@@ -683,6 +686,8 @@ async def save_property(request: SavePropertyRequest):
         existing.longitude = request.longitude
         existing.year_built = request.year_built
         existing.days_on_market = request.days_on_market
+        if request.description:
+            existing.description = request.description
         if request.photos:
             existing.photos = request.photos
         existing.overall_score = request.overall_score
@@ -720,6 +725,7 @@ async def save_property(request: SavePropertyRequest):
             property_type=request.property_type,
             year_built=request.year_built,
             days_on_market=request.days_on_market,
+            description=request.description,
             source=request.source,
             source_url=request.source_url,
             photos=request.photos,

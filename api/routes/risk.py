@@ -385,13 +385,22 @@ async def get_risk_assessment(property_id: str):
     repo = get_repository()
 
     # Get property data
-    property_data = repo.get_saved_property(property_id)
-    if not property_data:
+    saved_property = repo.get_saved_property(property_id)
+    if not saved_property:
         raise HTTPException(status_code=404, detail="Property not found")
 
-    # Get analysis data if available
-    analysis = property_data.get("analysis")
-    location_data = property_data.get("location_data", {})
+    # Convert model to dict for risk assessment functions
+    property_data = {
+        "list_price": saved_property.list_price,
+        "sqft": saved_property.sqft,
+        "days_on_market": saved_property.days_on_market,
+        "year_built": saved_property.year_built,
+        "photos": saved_property.photos or [],
+    }
+
+    # Get analysis and location data if available
+    analysis = saved_property.analysis_data
+    location_data = saved_property.location_data or {}
 
     # Assess risks by category
     property_flags = assess_property_risks(property_data)

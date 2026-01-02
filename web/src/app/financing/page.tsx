@@ -501,7 +501,7 @@ export default function FinancingDeskPage() {
                   setLenderForm({ lender_type: "bank", is_active: true });
                   setShowLenderModal(true);
                 }}
-                className="btn-primary text-sm"
+                className="btn-primary text-sm whitespace-nowrap"
               >
                 <Plus className="h-4 w-4 mr-1" />
                 Add Lender

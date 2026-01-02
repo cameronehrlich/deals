@@ -852,6 +852,19 @@ export default function SavedPropertyDetailPage({
             </div>
           </div>
 
+          {/* Listing Description */}
+          {savedProperty.description && (
+            <div className="card">
+              <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                <FileText className="h-5 w-5 text-primary-600" />
+                Listing Description
+              </h3>
+              <p className="text-gray-700 whitespace-pre-wrap leading-relaxed">
+                {savedProperty.description}
+              </p>
+            </div>
+          )}
+
           {/* Pipeline Status */}
           <div className="card border-primary-100">
             <div className="flex items-center justify-between">

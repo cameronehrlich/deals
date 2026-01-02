@@ -108,13 +108,21 @@ def calculate_safety_score(noise_data: Optional[dict]) -> Optional[int]:
     return max(0, min(100, safety))
 
 
-def calculate_flood_score(flood_zone: Optional[str]) -> Optional[int]:
+def calculate_flood_score(flood_zone) -> Optional[int]:
     """Calculate flood risk score from FEMA zone."""
     if not flood_zone:
         return None
 
+    # Handle dict format (e.g., {"zone": "X"}) or string
+    if isinstance(flood_zone, dict):
+        zone_str = flood_zone.get("zone") or flood_zone.get("flood_zone")
+        if not zone_str:
+            return None
+    else:
+        zone_str = str(flood_zone)
+
     # FEMA zones: X = minimal, A/AE/AH/AO/AR = high, V/VE = very high
-    zone_upper = flood_zone.upper()
+    zone_upper = zone_str.upper()
 
     if zone_upper.startswith("X") or zone_upper in ["B", "C"]:
         return 100  # Minimal risk
@@ -174,15 +182,16 @@ async def get_neighborhood_score_for_property(property_id: str):
     repo = get_repository()
 
     # Get the saved property
-    property_data = repo.get_saved_property(property_id)
-    if not property_data:
+    saved_property = repo.get_saved_property(property_id)
+    if not saved_property:
         raise HTTPException(status_code=404, detail="Property not found")
 
-    address = property_data.get("address")
-    city = property_data.get("city")
-    state = property_data.get("state")
-    zip_code = property_data.get("zip_code")
-    location_data = property_data.get("location_data", {})
+    # Access attributes directly (SavedPropertyDB is a SQLAlchemy model, not a dict)
+    address = saved_property.address
+    city = saved_property.city
+    state = saved_property.state
+    zip_code = saved_property.zip_code
+    location_data = saved_property.location_data or {}
 
     # Extract available data
     walk_score = location_data.get("walk_score")
@@ -269,7 +278,7 @@ async def get_neighborhood_score_for_property(property_id: str):
         flood_risk=LocationScore(
             score=flood_score,
             weight=weights["flood_risk"],
-            description=f"FEMA Zone {flood_zone}" if flood_zone else None,
+            description=f"FEMA Zone {flood_zone.get('zone', flood_zone) if isinstance(flood_zone, dict) else flood_zone}" if flood_zone else None,
             raw_value=None,
         ),
         school_summary=school_summary,
