@@ -63,6 +63,7 @@ import { ContactsPanel } from "@/components/ContactsPanel";
 import { CompsPanel } from "@/components/CompsPanel";
 import { NeighborhoodScorePanel } from "@/components/NeighborhoodScorePanel";
 import { RiskAssessmentPanel } from "@/components/RiskAssessmentPanel";
+import { DueDiligencePanel } from "@/components/DueDiligencePanel";
 
 export default function SavedPropertyDetailPage({
   params,
@@ -1318,6 +1319,12 @@ export default function SavedPropertyDetailPage({
 
           {/* Risk Assessment */}
           <RiskAssessmentPanel propertyId={propertyId} />
+
+          {/* AI Due Diligence */}
+          <DueDiligencePanel
+            propertyId={propertyId}
+            propertyAddress={`${savedProperty.address}, ${savedProperty.city}, ${savedProperty.state}`}
+          />
 
           {/* Location Insights Loading State */}
           {locationLoading && !locationData && savedProperty.latitude && savedProperty.longitude && (

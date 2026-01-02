@@ -135,7 +135,7 @@ async def create_job(request: JobCreate):
     repo = get_repository()
 
     # Validate job type
-    valid_types = ["enrich_market", "enrich_property"]
+    valid_types = ["enrich_market", "enrich_property", "due_diligence"]
     if request.job_type not in valid_types:
         raise HTTPException(
             status_code=400,
@@ -303,6 +303,116 @@ async def enqueue_property_job(request: EnqueuePropertyRequest):
         status="pending",
         message=f"Property created and enrichment job queued for {request.address}",
     )
+
+
+class DueDiligenceJobResponse(BaseModel):
+    """Response from due diligence job creation."""
+    property_id: str
+    job_id: str
+    status: str
+    message: str
+
+
+@router.post("/enqueue-due-diligence", response_model=DueDiligenceJobResponse)
+async def enqueue_due_diligence(property_id: str):
+    """
+    Queue a comprehensive AI due diligence research job for a property.
+
+    The AI agent will autonomously research:
+    - Property history and ownership records
+    - Legal and title issues (liens, easements, litigation)
+    - Environmental and safety concerns
+    - Market context and neighborhood trends
+    - Professional contacts (agents, inspectors, contractors)
+    - News and media mentions
+
+    Returns a job ID that can be polled for progress. When complete,
+    the property's due_diligence_report field will contain the full findings.
+    """
+    from src.db.models import SavedPropertyDB
+
+    repo = get_repository()
+
+    # Verify property exists
+    prop = repo.session.query(SavedPropertyDB).filter_by(id=property_id).first()
+    if not prop:
+        raise HTTPException(status_code=404, detail=f"Property not found: {property_id}")
+
+    # Check for existing pending/running due diligence job
+    existing_jobs = repo.get_jobs(job_type="due_diligence", limit=100)
+    for job in existing_jobs:
+        if job.payload.get("property_id") == property_id and job.status in ("pending", "running"):
+            return DueDiligenceJobResponse(
+                property_id=property_id,
+                job_id=job.id,
+                status=job.status,
+                message=f"Due diligence already in progress for {prop.address}",
+            )
+
+    # Check if we already have a completed report
+    if prop.due_diligence_report and prop.due_diligence_report.get("status") == "completed":
+        return DueDiligenceJobResponse(
+            property_id=property_id,
+            job_id="",
+            status="already_completed",
+            message=f"Due diligence already completed for {prop.address}. Use force=true to re-run.",
+        )
+
+    # Enqueue the due diligence job
+    job = repo.enqueue_job(
+        job_type="due_diligence",
+        payload={"property_id": property_id},
+        priority=2,  # High priority - user explicitly requested this
+    )
+
+    return DueDiligenceJobResponse(
+        property_id=property_id,
+        job_id=job.id,
+        status="pending",
+        message=f"AI due diligence research queued for {prop.address}",
+    )
+
+
+@router.get("/due-diligence/{property_id}")
+async def get_due_diligence_report(property_id: str):
+    """
+    Get the due diligence report for a property.
+
+    Returns the full report if available, or status if still in progress.
+    """
+    from src.db.models import SavedPropertyDB
+
+    repo = get_repository()
+
+    prop = repo.session.query(SavedPropertyDB).filter_by(id=property_id).first()
+    if not prop:
+        raise HTTPException(status_code=404, detail=f"Property not found: {property_id}")
+
+    if not prop.due_diligence_report:
+        # Check if there's a pending job
+        existing_jobs = repo.get_jobs(job_type="due_diligence", limit=100)
+        for job in existing_jobs:
+            if job.payload.get("property_id") == property_id:
+                return {
+                    "property_id": property_id,
+                    "status": job.status,
+                    "progress": job.progress,
+                    "message": job.message,
+                    "job_id": job.id,
+                    "report": None,
+                }
+
+        return {
+            "property_id": property_id,
+            "status": "not_started",
+            "report": None,
+        }
+
+    return {
+        "property_id": property_id,
+        "status": prop.due_diligence_report.get("status", "unknown"),
+        "report": prop.due_diligence_report,
+    }
 
 
 @router.get("", response_model=List[JobResponse])

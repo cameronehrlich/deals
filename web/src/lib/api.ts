@@ -1520,6 +1520,27 @@ class ApiClient {
   async getRiskAssessment(propertyId: string): Promise<RiskAssessment> {
     return this.fetch(`/api/risk/assessment/${propertyId}`);
   }
+
+  // ==================== AI Due Diligence Methods ====================
+
+  /**
+   * Queue an AI due diligence research job for a property.
+   * The AI will research property history, legal issues, environmental concerns,
+   * market context, and gather professional contacts.
+   */
+  async startDueDiligence(propertyId: string): Promise<DueDiligenceJobResponse> {
+    return this.fetch(`/api/jobs/enqueue-due-diligence?property_id=${propertyId}`, {
+      method: "POST",
+    });
+  }
+
+  /**
+   * Get the due diligence report for a property.
+   * Returns the full report if available, or status if still in progress.
+   */
+  async getDueDiligenceReport(propertyId: string): Promise<DueDiligenceReportResponse> {
+    return this.fetch(`/api/jobs/due-diligence/${propertyId}`);
+  }
 }
 
 // ==================== Comps Types (Phase 6) ====================
@@ -2033,6 +2054,75 @@ export interface PipelineOverview {
   total_properties: number;
   active_offers: number;
   under_contract: number;
+}
+
+// ==================== AI Due Diligence Types ====================
+
+export interface DueDiligenceJobResponse {
+  property_id: string;
+  job_id: string;
+  status: string;
+  message: string;
+}
+
+export interface DueDiligenceFlag {
+  severity?: "critical" | "high" | "medium" | "low";
+  title: string;
+  description: string;
+  source?: string;
+}
+
+export interface DueDiligenceFindings {
+  ownership_history?: Array<{
+    date?: string;
+    owner?: string;
+    sale_price?: string;
+  }>;
+  liens_found?: Array<{
+    type?: string;
+    amount?: string;
+    status?: string;
+  }>;
+  environmental_concerns?: Array<{
+    type?: string;
+    description?: string;
+    distance?: string;
+  }>;
+  listing_agent?: {
+    name?: string;
+    phone?: string;
+    email?: string;
+    company?: string;
+  };
+  neighborhood_trends?: string[];
+  development_plans?: string[];
+}
+
+export interface DueDiligenceReportData {
+  property_id: string;
+  property_address: string;
+  status: "pending" | "running" | "completed" | "failed";
+  started_at?: string;
+  completed_at?: string;
+  executive_summary?: string;
+  red_flags?: DueDiligenceFlag[];
+  yellow_flags?: DueDiligenceFlag[];
+  green_flags?: DueDiligenceFlag[];
+  recommended_actions?: string[];
+  questions_for_seller?: string[];
+  inspection_focus_areas?: string[];
+  findings?: DueDiligenceFindings;
+  sources_consulted?: string[];
+  errors?: string[];
+}
+
+export interface DueDiligenceReportResponse {
+  property_id: string;
+  status: string;
+  progress?: number;
+  message?: string;
+  job_id?: string;
+  report?: DueDiligenceReportData;
 }
 
 export const api = new ApiClient();
