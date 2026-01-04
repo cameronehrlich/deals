@@ -13,6 +13,8 @@ import {
   ArrowLeft,
   BarChart3,
   StopCircle,
+  ExternalLink,
+  Home,
 } from "lucide-react";
 import { api, Job, JobStats } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -332,7 +334,27 @@ export default function AdminJobsPage() {
                     {job.job_type.replace("_", " ")}
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-600">
-                    {String(job.payload.market_id || job.payload.property_id || "-")}
+                    {(() => {
+                      const propertyId = job.payload.property_id as string | undefined;
+                      const marketId = job.payload.market_id as string | undefined;
+                      if (propertyId) {
+                        return (
+                          <Link
+                            href={`/saved/${propertyId}`}
+                            className="text-primary-600 hover:text-primary-700 hover:underline flex items-center gap-1"
+                          >
+                            <Home className="h-3 w-3" />
+                            <span className="truncate max-w-[120px]" title={propertyId}>
+                              {propertyId.slice(0, 8)}...
+                            </span>
+                          </Link>
+                        );
+                      }
+                      if (marketId) {
+                        return <span>{marketId}</span>;
+                      }
+                      return <span>-</span>;
+                    })()}
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-600 max-w-xs truncate">
                     {job.error || job.message || "-"}
@@ -363,20 +385,31 @@ export default function AdminJobsPage() {
                     {formatDate(job.created_at)}
                   </td>
                   <td className="px-4 py-3">
-                    {job.status === "pending" && (
-                      <button
-                        onClick={() => handleCancelJob(job.id)}
-                        disabled={cancelling === job.id}
-                        className="text-red-600 hover:text-red-800 p-1"
-                        title="Cancel job"
-                      >
-                        {cancelling === job.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <XCircle className="h-4 w-4" />
-                        )}
-                      </button>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {(job.payload.property_id as string | undefined) && (
+                        <Link
+                          href={`/saved/${job.payload.property_id as string}`}
+                          className="text-primary-600 hover:text-primary-800 p-1"
+                          title="View property"
+                        >
+                          <ExternalLink className="h-4 w-4" />
+                        </Link>
+                      )}
+                      {job.status === "pending" && (
+                        <button
+                          onClick={() => handleCancelJob(job.id)}
+                          disabled={cancelling === job.id}
+                          className="text-red-600 hover:text-red-800 p-1"
+                          title="Cancel job"
+                        >
+                          {cancelling === job.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <XCircle className="h-4 w-4" />
+                          )}
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

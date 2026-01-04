@@ -81,6 +81,7 @@ class EnqueuePropertyRequest(BaseModel):
     source: str = "manual"
     source_url: Optional[str] = None
     photos: Optional[List[str]] = None
+    description: Optional[str] = None  # Listing description
 
     # Financing params for analysis
     down_payment_pct: float = 0.25
@@ -280,6 +281,7 @@ async def enqueue_property_job(request: EnqueuePropertyRequest):
             source=request.source,
             source_url=request.source_url,
             photos=request.photos,
+            description=request.description,
             pipeline_status="analyzing",  # Will be updated to "analyzed" by job
         )
 
@@ -489,7 +491,7 @@ async def process_pending_jobs(limit: int = Query(10, ge=1, le=50)):
     repo = get_repository()
 
     # Clean up any stuck jobs before processing new ones
-    stuck_failed = repo.fail_stuck_jobs(timeout_minutes=10)
+    stuck_failed = repo.fail_stuck_jobs(timeout_minutes=15)
     if stuck_failed > 0:
         print(f"[Jobs] Marked {stuck_failed} stuck job(s) as failed")
 

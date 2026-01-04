@@ -38,6 +38,7 @@ class ImportParsedRequest(BaseModel):
     bathrooms: float = Field(default=2.0, ge=0, le=20)
     sqft: Optional[int] = Field(None, ge=100, le=100000)
     property_type: str = Field(default="single_family_home")
+    description: Optional[str] = Field(None, description="Listing description from agent/seller")
     source: str = Field(default="manual", description="Data source (zillow, redfin, realtor, manual)")
     source_url: Optional[str] = Field(None, description="Original listing URL")
 

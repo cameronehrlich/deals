@@ -2,31 +2,51 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import {
   Home,
   MapPin,
   Search,
   Building2,
-  BarChart3,
   Bookmark,
   Settings,
   GitBranch,
   DollarSign,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { api, JobStats } from "@/lib/api";
 
 const navigation = [
   { name: "Dashboard", href: "/", icon: Home },
   { name: "Markets", href: "/markets", icon: MapPin },
   { name: "Find Deals", href: "/deals", icon: Search },
-  { name: "Saved", href: "/saved", icon: Bookmark },
+  { name: "Saved", href: "/saved", icon: Bookmark, showBadge: true },
   { name: "Pipeline", href: "/pipeline", icon: GitBranch },
   { name: "Financing", href: "/financing", icon: DollarSign },
-  { name: "Analyze", href: "/import", icon: BarChart3 },
 ];
 
 export function Navigation() {
   const pathname = usePathname();
+  const [jobStats, setJobStats] = useState<JobStats | null>(null);
+
+  // Poll job stats to show badge on Saved link
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        const stats = await api.getJobStats();
+        setJobStats(stats);
+      } catch (err) {
+        // Silently fail - badge just won't show
+      }
+    };
+
+    fetchStats();
+    const interval = setInterval(fetchStats, 10000); // Poll every 10 seconds
+
+    return () => clearInterval(interval);
+  }, []);
+
+  const processingCount = (jobStats?.pending || 0) + (jobStats?.running || 0);
 
   return (
     <nav className="bg-white border-b border-gray-200">
@@ -47,13 +67,14 @@ export function Navigation() {
                 const isActive = pathname === item.href ||
                   (item.href !== "/" && pathname.startsWith(item.href));
                 const Icon = item.icon;
+                const showBadge = item.showBadge && processingCount > 0;
 
                 return (
                   <Link
                     key={item.name}
                     href={item.href}
                     className={cn(
-                      "inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-md transition-colors",
+                      "inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-md transition-colors relative",
                       isActive
                         ? "text-primary-600 bg-primary-50"
                         : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"
@@ -61,6 +82,11 @@ export function Navigation() {
                   >
                     <Icon className="h-4 w-4" />
                     {item.name}
+                    {showBadge && (
+                      <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-white">
+                        {processingCount > 9 ? "9+" : processingCount}
+                      </span>
+                    )}
                   </Link>
                 );
               })}
@@ -86,13 +112,14 @@ export function Navigation() {
           {navigation.map((item) => {
             const isActive = pathname === item.href;
             const Icon = item.icon;
+            const showBadge = item.showBadge && processingCount > 0;
 
             return (
               <Link
                 key={item.name}
                 href={item.href}
                 className={cn(
-                  "flex flex-col items-center gap-1 px-3 py-2 text-xs font-medium",
+                  "flex flex-col items-center gap-1 px-3 py-2 text-xs font-medium relative",
                   isActive
                     ? "text-primary-600"
                     : "text-gray-600"
@@ -100,6 +127,11 @@ export function Navigation() {
               >
                 <Icon className="h-5 w-5" />
                 {item.name}
+                {showBadge && (
+                  <span className="absolute top-0 right-0 flex h-4 w-4 items-center justify-center rounded-full bg-amber-500 text-[9px] font-bold text-white">
+                    {processingCount > 9 ? "9+" : processingCount}
+                  </span>
+                )}
               </Link>
             );
           })}

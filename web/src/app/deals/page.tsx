@@ -1,13 +1,12 @@
 "use client";
 
-import { Suspense, useEffect, useState, useCallback, useRef, useLayoutEffect } from "react";
+import { Suspense, useEffect, useState, useCallback, useRef } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import {
   Search,
   Building,
   Radio,
   ExternalLink,
-  TrendingUp,
   ArrowUpDown,
   ChevronDown,
   Play,
@@ -16,9 +15,13 @@ import {
   AlertCircle,
   Bookmark,
   Check,
+  Link2,
+  X,
+  Clock,
+  BookmarkCheck,
 } from "lucide-react";
 import { ImageCarousel } from "@/components/ImageCarousel";
-import { api, PropertyListing, ApiUsage } from "@/lib/api";
+import { api, PropertyListing, ApiUsage, JobStats } from "@/lib/api";
 import { LoadingPage, LoadingSpinner } from "@/components/LoadingSpinner";
 import { cn, formatCurrency } from "@/lib/utils";
 
@@ -149,24 +152,36 @@ const INITIAL_LOAD = 10;
 const LOAD_MORE_COUNT = 10;
 const MAX_RESULTS = 42; // API free tier max
 
+// Card state type
+type CardState = "default" | "saving" | "processing" | "saved";
+
 // Property card for live listings
 function LivePropertyCard({
   property,
-  onAnalyze,
+  onSaveAndAnalyze,
+  onViewSaved,
   isSelected,
   onToggleSelect,
-  isSaved,
+  cardState,
+  savedPropertyId,
 }: {
   property: PropertyListing;
-  onAnalyze: () => void;
+  onSaveAndAnalyze: () => void;
+  onViewSaved: () => void;
   isSelected: boolean;
   onToggleSelect: () => void;
-  isSaved: boolean;
+  cardState: CardState;
+  savedPropertyId?: string;
 }) {
+  const isSaved = cardState === "saved";
+  const isSaving = cardState === "saving";
+  const isProcessing = cardState === "processing";
+
   return (
     <div className={cn(
-      "card hover:shadow-lg transition-shadow",
-      isSelected && "ring-2 ring-primary-500"
+      "card hover:shadow-lg transition-all duration-300",
+      isSelected && "ring-2 ring-primary-500",
+      isSaving && "animate-pulse-ring ring-2 ring-primary-400"
     )}>
       {/* Photo Carousel */}
       <div className="relative h-48 -mx-4 -mt-4 mb-4 bg-gray-100 rounded-t-lg overflow-hidden">
@@ -189,11 +204,23 @@ function LivePropertyCard({
         >
           {isSelected && <Check className="h-4 w-4" />}
         </button>
-        {/* Saved indicator */}
-        {isSaved && (
-          <div className="absolute top-2 right-2 px-2 py-1 bg-primary-600 text-white text-xs font-medium rounded-full flex items-center gap-1 z-10">
-            <Bookmark className="h-3 w-3 fill-current" />
-            Saved
+        {/* Status indicator */}
+        {(isSaved || isProcessing) && (
+          <div className={cn(
+            "absolute top-2 right-2 px-2 py-1 text-white text-xs font-medium rounded-full flex items-center gap-1 z-10 transition-all",
+            isSaved ? "bg-green-600" : "bg-amber-500"
+          )}>
+            {isProcessing ? (
+              <>
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Analyzing...
+              </>
+            ) : (
+              <>
+                <BookmarkCheck className="h-3 w-3" />
+                Saved
+              </>
+            )}
           </div>
         )}
       </div>
@@ -246,13 +273,41 @@ function LivePropertyCard({
               View Listing
             </a>
           )}
-          <button
-            onClick={onAnalyze}
-            className="btn-primary text-sm flex-1 flex items-center justify-center gap-1"
-          >
-            <TrendingUp className="h-4 w-4" />
-            Analyze
-          </button>
+          {isSaved ? (
+            <button
+              onClick={onViewSaved}
+              className="btn-primary text-sm flex-1 flex items-center justify-center gap-1 bg-green-600 hover:bg-green-700"
+            >
+              <Check className="h-4 w-4" />
+              View Saved
+            </button>
+          ) : (
+            <button
+              onClick={onSaveAndAnalyze}
+              disabled={isSaving || isProcessing}
+              className={cn(
+                "btn-primary text-sm flex-1 flex items-center justify-center gap-1",
+                (isSaving || isProcessing) && "opacity-75 cursor-not-allowed"
+              )}
+            >
+              {isSaving ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Saving...
+                </>
+              ) : isProcessing ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Processing...
+                </>
+              ) : (
+                <>
+                  <Bookmark className="h-4 w-4" />
+                  Save & Analyze
+                </>
+              )}
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -300,6 +355,21 @@ function DealsContent() {
   // Selection state
   const [selectedPropertyIds, setSelectedPropertyIds] = useState<Set<string>>(new Set());
   const [savedPropertyIds, setSavedPropertyIds] = useState<Set<string>>(new Set());
+
+  // Property save/analyze state tracking
+  const [savingPropertyIds, setSavingPropertyIds] = useState<Set<string>>(new Set());
+  const [processingPropertyIds, setProcessingPropertyIds] = useState<Map<string, string>>(new Map()); // property_id -> saved_property_id
+  const [savedPropertyIdMap, setSavedPropertyIdMap] = useState<Map<string, string>>(new Map()); // property_id -> saved_property_id
+
+  // Job queue state
+  const [jobStats, setJobStats] = useState<JobStats | null>(null);
+
+  // URL import state
+  const [showUrlImport, setShowUrlImport] = useState(false);
+  const [importUrl, setImportUrl] = useState("");
+  const [importingUrl, setImportingUrl] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importSuccess, setImportSuccess] = useState(false);
 
   // Markets dropdown
   const [availableMarkets, setAvailableMarkets] = useState<string[]>(DEFAULT_MARKETS);
@@ -445,8 +515,13 @@ function DealsContent() {
     }
   }, [hasMore, canLoadMoreFromApi, searchLiveProperties, allProperties.length]);
 
-  // Analyze a property - create/find saved property and navigate to analyze page
-  const handleAnalyze = async (property: PropertyListing) => {
+  // Save and analyze a property - saves to database and queues enrichment job
+  const handleSaveAndAnalyze = async (property: PropertyListing) => {
+    const propertyId = property.property_id;
+
+    // Mark as saving
+    setSavingPropertyIds(prev => new Set(prev).add(propertyId));
+
     try {
       // Create property record (or get existing one) via API
       const response = await api.enqueuePropertyJob({
@@ -464,15 +539,98 @@ function DealsContent() {
         source: property.source,
         source_url: property.source_url,
         photos: property.photos,
+        description: property.description,
       });
 
-      // Navigate with just the property ID - much cleaner URL
-      router.push(`/import?id=${response.property_id}&job=${response.job_id}&status=${response.status}`);
+      // Remove from saving
+      setSavingPropertyIds(prev => {
+        const next = new Set(prev);
+        next.delete(propertyId);
+        return next;
+      });
+
+      // Track saved property ID mapping
+      setSavedPropertyIdMap(prev => new Map(prev).set(propertyId, response.property_id));
+
+      if (response.status === "already_analyzed") {
+        // Already saved and analyzed - mark as saved
+        setSavedPropertyIds(prev => new Set(prev).add(propertyId));
+        const key = `${property.address}|${property.city}|${property.state}`.toLowerCase();
+        setSavedPropertyIds(prev => new Set(prev).add(key));
+      } else {
+        // Job is running - mark as processing
+        setProcessingPropertyIds(prev => new Map(prev).set(propertyId, response.property_id));
+
+        // Refresh job stats
+        refreshJobStats();
+      }
     } catch (err) {
-      console.error("Failed to create property:", err);
-      // Fallback to the old URL-encoded approach
-      const propertyData = encodeURIComponent(JSON.stringify(property));
-      router.push(`/import?property=${propertyData}`);
+      console.error("Failed to save property:", err);
+      // Remove from saving on error
+      setSavingPropertyIds(prev => {
+        const next = new Set(prev);
+        next.delete(propertyId);
+        return next;
+      });
+    }
+  };
+
+  // Navigate to saved property detail
+  const handleViewSaved = (property: PropertyListing) => {
+    const savedId = savedPropertyIdMap.get(property.property_id);
+    if (savedId) {
+      router.push(`/saved/${savedId}`);
+    } else {
+      // Fallback: try to find by address-based lookup in saved properties
+      router.push("/saved");
+    }
+  };
+
+  // Refresh job stats
+  const refreshJobStats = async () => {
+    try {
+      const stats = await api.getJobStats();
+      setJobStats(stats);
+    } catch (err) {
+      console.error("Failed to fetch job stats:", err);
+    }
+  };
+
+  // Handle URL import
+  const handleUrlImport = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!importUrl.trim()) return;
+
+    setImportingUrl(true);
+    setImportError(null);
+    setImportSuccess(false);
+
+    try {
+      // For URL import, we need to first parse the URL to get property data
+      // Then enqueue it just like Save & Analyze
+      const response = await api.importFromUrl({
+        url: importUrl.trim(),
+        down_payment_pct: 0.2,
+        interest_rate: 0.07,
+      });
+
+      if (response.success && response.saved_id) {
+        setImportSuccess(true);
+        setImportUrl("");
+        refreshJobStats();
+
+        // Auto-hide success message after 3 seconds
+        setTimeout(() => {
+          setImportSuccess(false);
+          setShowUrlImport(false);
+        }, 3000);
+      } else {
+        setImportError(response.message || "Failed to import property");
+      }
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "Failed to import. Try pasting the full property URL.");
+    } finally {
+      setImportingUrl(false);
     }
   };
 
@@ -484,6 +642,14 @@ function DealsContent() {
     const key = `${property.address}|${property.city}|${property.state}`.toLowerCase();
     return savedPropertyIds.has(key);
   }, [savedPropertyIds]);
+
+  // Get card state for a property
+  const getCardState = useCallback((property: PropertyListing): CardState => {
+    if (savingPropertyIds.has(property.property_id)) return "saving";
+    if (processingPropertyIds.has(property.property_id)) return "processing";
+    if (isPropertySaved(property)) return "saved";
+    return "default";
+  }, [savingPropertyIds, processingPropertyIds, isPropertySaved]);
 
   // Toggle property selection
   const togglePropertySelection = useCallback((propertyId: string) => {
@@ -503,26 +669,26 @@ function DealsContent() {
     setSelectedPropertyIds(new Set());
   }, []);
 
-  // Analyze all visible properties (or selected ones) in bulk
-  const handleAnalyzeAll = async () => {
+  // Save and analyze all visible properties (or selected ones) in bulk
+  const handleSaveAll = async () => {
     if (analyzingAll) return;
 
-    // If properties are selected, only analyze those; otherwise analyze all
+    // If properties are selected, only save those; otherwise save all displayed
     const baseProperties = selectedPropertyIds.size > 0
       ? displayedProperties.filter(p => selectedPropertyIds.has(p.property_id))
       : displayedProperties;
 
-    // Get properties to analyze - only those not already processed in this session
-    const propertiesToAnalyze = baseProperties.filter(
-      p => !analyzedInSession.has(p.property_id)
+    // Get properties to save - only those not already saved
+    const propertiesToSave = baseProperties.filter(
+      p => !isPropertySaved(p) && !savingPropertyIds.has(p.property_id) && !processingPropertyIds.has(p.property_id)
     );
 
-    if (propertiesToAnalyze.length === 0) {
+    if (propertiesToSave.length === 0) {
       setAnalyzeProgress({
-        total: displayedProperties.length,
-        processed: displayedProperties.length,
+        total: baseProperties.length,
+        processed: baseProperties.length,
         newJobs: 0,
-        alreadyAnalyzed: displayedProperties.length,
+        alreadyAnalyzed: baseProperties.length,
         inProgress: 0,
         errors: 0,
       });
@@ -531,7 +697,7 @@ function DealsContent() {
 
     setAnalyzingAll(true);
     setAnalyzeProgress({
-      total: propertiesToAnalyze.length,
+      total: propertiesToSave.length,
       processed: 0,
       newJobs: 0,
       alreadyAnalyzed: 0,
@@ -543,11 +709,13 @@ function DealsContent() {
     let alreadyAnalyzed = 0;
     let inProgress = 0;
     let errors = 0;
-    const newlyAnalyzed = new Set<string>();
+    const newlySaved = new Set<string>();
+    const newProcessing = new Map<string, string>();
+    const newSavedIds = new Map<string, string>();
 
     // Process properties sequentially to avoid rate limiting
-    for (let i = 0; i < propertiesToAnalyze.length; i++) {
-      const property = propertiesToAnalyze[i];
+    for (let i = 0; i < propertiesToSave.length; i++) {
+      const property = propertiesToSave[i];
 
       try {
         const response = await api.enqueuePropertyJob({
@@ -567,26 +735,28 @@ function DealsContent() {
           photos: property.photos,
         });
 
+        // Track saved property ID mapping
+        newSavedIds.set(property.property_id, response.property_id);
+
         // Track by response status
         if (response.status === "already_analyzed") {
           alreadyAnalyzed++;
+          newlySaved.add(property.property_id);
         } else if (response.status === "running" || response.status === "pending") {
-          // Check if it's a new job we just created or an existing one
           if (response.job_id) {
             inProgress++;
           }
           newJobs++;
+          newProcessing.set(property.property_id, response.property_id);
         }
-
-        newlyAnalyzed.add(property.property_id);
       } catch (err) {
-        console.error(`Failed to enqueue property ${property.address}:`, err);
+        console.error(`Failed to save property ${property.address}:`, err);
         errors++;
       }
 
       // Update progress
       setAnalyzeProgress({
-        total: propertiesToAnalyze.length,
+        total: propertiesToSave.length,
         processed: i + 1,
         newJobs,
         alreadyAnalyzed,
@@ -595,16 +765,37 @@ function DealsContent() {
       });
     }
 
-    // Update session tracking
-    setAnalyzedInSession(prev => {
-      const updated = new Set(prev);
-      newlyAnalyzed.forEach(id => updated.add(id));
+    // Update state tracking
+    setSavedPropertyIdMap(prev => {
+      const updated = new Map(prev);
+      newSavedIds.forEach((v, k) => updated.set(k, v));
       return updated;
     });
 
-    // Clear selection after analyzing
+    // Mark already analyzed as saved
+    if (newlySaved.size > 0) {
+      setSavedPropertyIds(prev => {
+        const updated = new Set(prev);
+        newlySaved.forEach(id => updated.add(id));
+        return updated;
+      });
+    }
+
+    // Mark processing ones
+    if (newProcessing.size > 0) {
+      setProcessingPropertyIds(prev => {
+        const updated = new Map(prev);
+        newProcessing.forEach((v, k) => updated.set(k, v));
+        return updated;
+      });
+    }
+
+    // Clear selection after saving
     clearSelection();
     setAnalyzingAll(false);
+
+    // Refresh job stats
+    refreshJobStats();
   };
 
   // Load favorite markets for dropdown
@@ -635,19 +826,76 @@ function DealsContent() {
         // Create a set of identifiers we can match against
         // Match by address + city + state since property_id formats differ
         const savedSet = new Set<string>();
+        const idMap = new Map<string, string>();
+
         savedProperties.forEach(p => {
           // Add the property ID directly
-          if (p.id) savedSet.add(p.id);
+          if (p.id) {
+            savedSet.add(p.id);
+            // Also store in ID map for navigation
+            idMap.set(p.id, p.id);
+          }
           // Also add address-based key for matching
-          savedSet.add(`${p.address}|${p.city}|${p.state}`.toLowerCase());
+          const key = `${p.address}|${p.city}|${p.state}`.toLowerCase();
+          savedSet.add(key);
         });
         setSavedPropertyIds(savedSet);
+        setSavedPropertyIdMap(prev => {
+          const merged = new Map(prev);
+          idMap.forEach((v, k) => merged.set(k, v));
+          return merged;
+        });
       } catch (err) {
         console.error("Failed to load saved properties:", err);
       }
     }
     loadSavedPropertyIds();
   }, []);
+
+  // Poll job stats periodically to update queue indicator
+  useEffect(() => {
+    // Initial fetch
+    refreshJobStats();
+
+    // Poll every 5 seconds if there are processing properties
+    const interval = setInterval(() => {
+      if (processingPropertyIds.size > 0) {
+        refreshJobStats();
+
+        // Check if any processing properties have completed
+        // by fetching saved properties again
+        api.getSavedProperties().then(savedProperties => {
+          const completedIds: string[] = [];
+
+          processingPropertyIds.forEach((savedId, propertyId) => {
+            // Check if this property now has analysis data
+            const savedProp = savedProperties.find(p => p.id === savedId);
+            if (savedProp && savedProp.overall_score !== null && savedProp.overall_score !== undefined) {
+              completedIds.push(propertyId);
+            }
+          });
+
+          if (completedIds.length > 0) {
+            // Move from processing to saved
+            setProcessingPropertyIds(prev => {
+              const next = new Map(prev);
+              completedIds.forEach(id => next.delete(id));
+              return next;
+            });
+            setSavedPropertyIds(prev => {
+              const next = new Set(prev);
+              completedIds.forEach(id => next.add(id));
+              return next;
+            });
+          }
+        }).catch(err => {
+          console.error("Failed to check processing properties:", err);
+        });
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [processingPropertyIds.size]);
 
   // Try to restore state from sessionStorage on mount
   useEffect(() => {
@@ -721,13 +969,92 @@ function DealsContent() {
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Find Deals</h1>
           <p className="text-gray-500 mt-1">
-            Search live property listings to analyze
+            Search live property listings and save for analysis
           </p>
         </div>
-        <div className="flex items-center gap-2 text-sm text-green-600">
-          <Radio className="h-4 w-4" />
-          <span>Live Data</span>
+        <div className="flex items-center gap-4">
+          {/* Job Queue Indicator */}
+          {jobStats && (jobStats.pending > 0 || jobStats.running > 0) && (
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-full text-sm">
+              <Clock className="h-4 w-4 text-amber-600 animate-pulse" />
+              <span className="text-amber-700">
+                Processing {jobStats.running} of {jobStats.pending + jobStats.running}
+              </span>
+            </div>
+          )}
+          <div className="flex items-center gap-2 text-sm text-green-600">
+            <Radio className="h-4 w-4" />
+            <span>Live Data</span>
+          </div>
         </div>
+      </div>
+
+      {/* URL Import Section */}
+      <div className="flex items-center gap-4">
+        {!showUrlImport ? (
+          <button
+            onClick={() => setShowUrlImport(true)}
+            className="btn-outline text-sm flex items-center gap-2"
+          >
+            <Link2 className="h-4 w-4" />
+            Import URL
+          </button>
+        ) : (
+          <form onSubmit={handleUrlImport} className="flex-1 max-w-2xl">
+            <div className="flex gap-2">
+              <div className="flex-1 relative">
+                <input
+                  type="url"
+                  value={importUrl}
+                  onChange={(e) => setImportUrl(e.target.value)}
+                  placeholder="Paste Zillow, Redfin, or Realtor.com URL..."
+                  className="input pr-10"
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowUrlImport(false);
+                    setImportUrl("");
+                    setImportError(null);
+                  }}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <button
+                type="submit"
+                disabled={importingUrl || !importUrl.trim()}
+                className="btn-primary flex items-center gap-2"
+              >
+                {importingUrl ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Importing...
+                  </>
+                ) : (
+                  <>
+                    <Bookmark className="h-4 w-4" />
+                    Import & Save
+                  </>
+                )}
+              </button>
+            </div>
+            {importError && (
+              <p className="text-sm text-red-600 mt-2 flex items-center gap-1">
+                <AlertCircle className="h-4 w-4" />
+                {importError}
+              </p>
+            )}
+            {importSuccess && (
+              <p className="text-sm text-green-600 mt-2 flex items-center gap-1">
+                <CheckCircle className="h-4 w-4" />
+                Property imported! Check your Saved Properties.
+              </p>
+            )}
+          </form>
+        )}
       </div>
 
       {/* Search Controls */}
@@ -883,9 +1210,9 @@ function DealsContent() {
                     </select>
                   </div>
 
-                  {/* Analyze Button */}
+                  {/* Save All Button */}
                   <button
-                    onClick={handleAnalyzeAll}
+                    onClick={handleSaveAll}
                     disabled={analyzingAll || displayedProperties.length === 0}
                     className={cn(
                       "flex items-center gap-2 px-4 py-1.5 text-sm font-medium rounded-md transition-colors",
@@ -897,24 +1224,24 @@ function DealsContent() {
                     {analyzingAll ? (
                       <>
                         <Loader2 className="h-4 w-4 animate-spin" />
-                        Analyzing {analyzeProgress?.processed}/{analyzeProgress?.total}...
+                        Saving {analyzeProgress?.processed}/{analyzeProgress?.total}...
                       </>
                     ) : selectedPropertyIds.size > 0 ? (
                       <>
-                        <Play className="h-4 w-4" />
-                        Analyze Selected ({selectedPropertyIds.size})
+                        <Bookmark className="h-4 w-4" />
+                        Save Selected ({selectedPropertyIds.size})
                       </>
                     ) : (
                       <>
-                        <Play className="h-4 w-4" />
-                        Analyze All ({displayedProperties.length})
+                        <Bookmark className="h-4 w-4" />
+                        Save All ({displayedProperties.length})
                       </>
                     )}
                   </button>
                 </div>
               </div>
 
-              {/* Analyze Progress/Results Banner */}
+              {/* Save Progress/Results Banner */}
               {analyzeProgress && !analyzingAll && analyzeProgress.processed > 0 && (
                 <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
                   <div className="flex items-center justify-between">
@@ -923,12 +1250,12 @@ function DealsContent() {
                       <div className="flex items-center gap-3 text-sm">
                         {analyzeProgress.newJobs > 0 && (
                           <span className="text-primary-600 font-medium">
-                            {analyzeProgress.newJobs} queued for analysis
+                            {analyzeProgress.newJobs} saved & queued for analysis
                           </span>
                         )}
                         {analyzeProgress.alreadyAnalyzed > 0 && (
                           <span className="text-gray-500">
-                            {analyzeProgress.alreadyAnalyzed} already analyzed
+                            {analyzeProgress.alreadyAnalyzed} already saved
                           </span>
                         )}
                         {analyzeProgress.errors > 0 && (
@@ -948,7 +1275,7 @@ function DealsContent() {
                   </div>
                   {analyzeProgress.newJobs > 0 && (
                     <p className="mt-2 text-xs text-gray-500">
-                      Jobs are processing in the background. Visit Saved Properties to see analyzed results.
+                      Properties are being analyzed in the background. Visit Saved Properties to see results.
                     </p>
                   )}
                 </div>
@@ -964,10 +1291,12 @@ function DealsContent() {
                   >
                     <LivePropertyCard
                       property={property}
-                      onAnalyze={() => handleAnalyze(property)}
+                      onSaveAndAnalyze={() => handleSaveAndAnalyze(property)}
+                      onViewSaved={() => handleViewSaved(property)}
                       isSelected={selectedPropertyIds.has(property.property_id)}
                       onToggleSelect={() => togglePropertySelection(property.property_id)}
-                      isSaved={isPropertySaved(property)}
+                      cardState={getCardState(property)}
+                      savedPropertyId={savedPropertyIdMap.get(property.property_id)}
                     />
                   </div>
                 ))}

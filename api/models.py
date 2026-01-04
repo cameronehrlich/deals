@@ -185,34 +185,6 @@ class DealSummary(BaseModel):
     cons: list[str] = Field(default_factory=list)
 
 
-class DealDetail(BaseModel):
-    """Full deal analysis."""
-    id: str
-    property: PropertyDetail
-    score: Optional[DealScore] = None
-    financials: Optional[FinancialDetail] = None
-    sensitivity: Optional["SensitivityResult"] = None
-    market: Optional[MarketDetail] = None
-    pipeline_status: str
-    strategy: Optional[str] = None
-    verdict: Optional[str] = None
-    recommendations: list[str] = Field(default_factory=list)
-    pros: list[str] = Field(default_factory=list)
-    cons: list[str] = Field(default_factory=list)
-    red_flags: list[str] = Field(default_factory=list)
-    notes: list[str] = Field(default_factory=list)
-    first_seen: datetime
-    last_analyzed: Optional[datetime] = None
-
-
-class DealsResponse(BaseModel):
-    """Response for deals search."""
-    deals: list[DealSummary]
-    total: int
-    filters_applied: dict = Field(default_factory=dict)
-
-
-# Analysis response models
 class SensitivityResult(BaseModel):
     """Stress test results."""
     base_cash_flow: float
@@ -238,6 +210,34 @@ class SensitivityResult(BaseModel):
     risk_rating: str
 
 
+class DealDetail(BaseModel):
+    """Full deal analysis."""
+    id: str
+    property: PropertyDetail
+    score: Optional[DealScore] = None
+    financials: Optional[FinancialDetail] = None
+    sensitivity: Optional[SensitivityResult] = None
+    market: Optional[MarketDetail] = None
+    pipeline_status: str
+    strategy: Optional[str] = None
+    verdict: Optional[str] = None
+    recommendations: list[str] = Field(default_factory=list)
+    pros: list[str] = Field(default_factory=list)
+    cons: list[str] = Field(default_factory=list)
+    red_flags: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+    first_seen: datetime
+    last_analyzed: Optional[datetime] = None
+
+
+class DealsResponse(BaseModel):
+    """Response for deals search."""
+    deals: list[DealSummary]
+    total: int
+    filters_applied: dict = Field(default_factory=dict)
+
+
+# Analysis response models
 class AnalysisRequest(BaseModel):
     """Request for property analysis."""
     purchase_price: float = Field(..., gt=0)

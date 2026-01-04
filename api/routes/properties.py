@@ -96,7 +96,7 @@ def _listing_to_response(listing: PropertyListing) -> PropertyListingResponse:
         hoa_fee=listing.hoa_fee,
         latitude=listing.latitude,
         longitude=listing.longitude,
-        description=listing.description,
+        description=getattr(listing, 'description', None),
     )
 
 

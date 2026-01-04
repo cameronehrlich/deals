@@ -13,7 +13,7 @@ from typing import Optional
 import json
 
 try:
-    import anthropic
+    from anthropic import AsyncAnthropic
     HAS_ANTHROPIC = True
 except ImportError:
     HAS_ANTHROPIC = False
@@ -256,7 +256,7 @@ class DueDiligenceAgent(BaseAgent):
     async def _run_research(self, property_context: str, report: DueDiligenceReport) -> str:
         """Run the main research using Claude with web search."""
 
-        client = anthropic.Anthropic(api_key=self.api_key)
+        client = AsyncAnthropic(api_key=self.api_key)
 
         research_prompt = f"""You are a thorough real estate due diligence researcher acting as an expert combination of:
 - A seasoned real estate attorney
@@ -319,21 +319,27 @@ At the end, provide:
 
 Be thorough but organized. Focus on actionable intelligence that would affect a buying decision."""
 
-        # Use Claude with web search tool
-        response = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=8000,
-            tools=[
-                {
-                    "type": "web_search_20250305",
-                    "name": "web_search",
-                    "max_uses": 20,
-                }
-            ],
-            messages=[
-                {"role": "user", "content": research_prompt}
-            ]
-        )
+        # Use Claude with web search tool (async call with timeout)
+        try:
+            response = await asyncio.wait_for(
+                client.messages.create(
+                    model="claude-sonnet-4-20250514",
+                    max_tokens=8000,
+                    tools=[
+                        {
+                            "type": "web_search_20250305",
+                            "name": "web_search",
+                            "max_uses": 15,  # Reduced from 20 to speed up
+                        }
+                    ],
+                    messages=[
+                        {"role": "user", "content": research_prompt}
+                    ]
+                ),
+                timeout=300.0,  # 5 minute timeout for web search phase
+            )
+        except asyncio.TimeoutError:
+            raise Exception("Research phase timed out after 5 minutes")
 
         # Collect all text responses and track sources
         research_text = []
@@ -355,7 +361,7 @@ Be thorough but organized. Focus on actionable intelligence that would affect a 
         report.raw_research_notes = research_text
 
         # Use Claude to structure the findings
-        client = anthropic.Anthropic(api_key=self.api_key)
+        client = AsyncAnthropic(api_key=self.api_key)
 
         structure_prompt = f"""Based on this due diligence research, extract and structure the findings into JSON format.
 
@@ -390,13 +396,21 @@ Please return a JSON object with this structure:
 Only include sections where you found relevant information. Be precise and factual.
 Return ONLY valid JSON, no markdown code blocks or other formatting."""
 
-        response = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=4000,
-            messages=[
-                {"role": "user", "content": structure_prompt}
-            ]
-        )
+        try:
+            response = await asyncio.wait_for(
+                client.messages.create(
+                    model="claude-sonnet-4-20250514",
+                    max_tokens=4000,
+                    messages=[
+                        {"role": "user", "content": structure_prompt}
+                    ]
+                ),
+                timeout=60.0,  # 1 minute timeout for parsing
+            )
+        except asyncio.TimeoutError:
+            report.errors.append("Parsing phase timed out")
+            report.executive_summary = research_text[:2000] if len(research_text) > 2000 else research_text
+            return
 
         # Parse the JSON response
         response_text = ""

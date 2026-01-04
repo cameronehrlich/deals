@@ -1684,6 +1684,7 @@ export interface EnqueuePropertyRequest {
   source?: string;
   source_url?: string;
   photos?: string[];
+  description?: string;
   down_payment_pct?: number;
   interest_rate?: number;
 }

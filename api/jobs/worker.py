@@ -6,6 +6,10 @@ import sys
 from datetime import datetime
 from typing import Optional
 
+# Load environment variables from .env file
+from dotenv import load_dotenv
+load_dotenv()
+
 from src.db.sqlite_repository import get_repository
 from src.db.models import JobDB
 from api.jobs.handlers import execute_job
@@ -23,7 +27,7 @@ class JobWorker:
         python -m api.jobs.worker
     """
 
-    def __init__(self, poll_interval: float = 2.0, stuck_timeout_minutes: int = 10):
+    def __init__(self, poll_interval: float = 2.0, stuck_timeout_minutes: int = 15):
         self.poll_interval = poll_interval
         self.stuck_timeout_minutes = stuck_timeout_minutes
         self.running = False
