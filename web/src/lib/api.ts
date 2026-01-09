@@ -3,11 +3,7 @@
  */
 
 // Use NEXT_PUBLIC_API_URL for deployed environments, empty for local dev (uses Next.js rewrites)
-// Fallback to devpush API deployment URL if env var not set
-const API_URL = process.env.NEXT_PUBLIC_API_URL ||
-  (typeof window !== 'undefined' && window.location.hostname.includes('devpush-vm.orb.local')
-    ? "https://deals-api-cameron-ehrlich-id-2a89557.apps.devpush-vm.orb.local"
-    : "");
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 
 export interface Market {
   id: string;
