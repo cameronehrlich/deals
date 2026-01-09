@@ -2,8 +2,8 @@
  * API client for Real Estate Deal Platform
  */
 
-// Use relative URL - Next.js rewrites will proxy to the actual API
-const API_URL = "";
+// Use NEXT_PUBLIC_API_URL for deployed environments, empty for local dev (uses Next.js rewrites)
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 
 export interface Market {
   id: string;
