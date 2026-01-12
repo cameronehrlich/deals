@@ -48,8 +48,7 @@ web/src/
 ├── app/                 # Next.js App Router
 │   ├── page.tsx         # Dashboard
 │   ├── markets/         # Market list and detail
-│   ├── deals/           # Live search with sorting, load more
-│   ├── import/          # URL import and property analysis
+│   ├── deals/           # Live search, save & analyze, URL import
 │   ├── saved/           # Saved properties with full analysis
 │   ├── pipeline/        # Kanban board for deal pipeline
 │   └── financing/       # Loan comparison and financing options
@@ -72,32 +71,30 @@ electron/
 
 ## Property Journey Architecture
 
-Properties flow through three tiers of increasing data richness:
+Properties flow through two tiers - browse then save for analysis:
 
-**Tier 1 - Quick Score (Search Results)**
-- Basic metrics: price, beds/baths, sqft, days on market
-- Quick CoC and cap rate estimates
-- Displayed in search results and deal cards
-- Data from: Live API search
+**Tier 1 - Browse (Find Deals Page)**
+- Basic metrics: price, beds/baths, sqft, days on market, photos
+- Quick CoC and cap rate estimates displayed on cards
+- "Save & Analyze" button queues enrichment job
+- URL import available for Zillow/Redfin/Realtor.com links
+- Job queue indicator shows processing status
+- Cards show "Analyzing..." while jobs run, "Saved" when complete
 
-**Tier 2 - Full Analysis (Deal Detail Page)**
-- Complete financial analysis with expense breakdown
+**Tier 2 - Full Analysis (Saved Properties)**
+- All analysis data persisted to SQLite after enrichment job completes
 - Location insights: Walk Score, noise, schools, flood zone
-- Market context and comparable properties
-- Pros/cons/red flags evaluation
-- Data fetched on-demand, not persisted
-
-**Tier 3 - Enriched (Saved Properties)**
-- All Tier 2 data, persisted to SQLite
-- Location data cached to avoid repeated API calls
+- Complete financial analysis with expense breakdown
 - Custom "What Should I Offer" scenarios
 - User notes and tags
 - Re-analyze capability with current market data
+- Due diligence AI analysis available
 
 **Key Files:**
 - `src/db/models.py` - `SavedPropertyDB` with JSON columns for location_data, custom_scenarios
 - `api/routes/saved.py` - Enrichment endpoints: `/refresh-location`, `/reanalyze`, `/scenarios`
-- `web/src/components/PropertyAnalysisView.tsx` - Shared UI component for Tier 2 & 3
+- `web/src/app/deals/page.tsx` - Browse, save & analyze, URL import
+- `web/src/app/saved/[id]/page.tsx` - Full property analysis view
 
 **Adding New Location Data:**
 1. Create data source in `src/data_sources/` (e.g., `fema_flood.py`)
@@ -189,16 +186,19 @@ BLS_API_KEY=xxx           # Optional, metro employment data (get free at data.bl
 | Feature | Files |
 |---------|-------|
 | Live property search | `api/routes/properties.py`, `src/data_sources/real_estate_providers/` |
+| Save & analyze flow | `web/src/app/deals/page.tsx`, `api/routes/jobs.py` |
+| URL import | `web/src/app/deals/page.tsx`, `api/routes/import_property.py` |
 | Property analysis | `api/routes/import_property.py`, `src/models/financials.py` |
 | Saved properties | `api/routes/saved.py`, `src/db/sqlite_repository.py` |
 | Market favorites | `api/routes/saved.py`, `web/src/app/markets/page.tsx` |
 | Background jobs | `api/routes/jobs.py`, `api/jobs/worker.py`, `api/jobs/handlers.py` |
+| Job queue UI | `web/src/app/deals/page.tsx`, `web/src/components/Navigation.tsx` |
 | Market enrichment | `src/data_sources/aggregator.py`, `api/jobs/handlers.py` |
 | Income data | `src/data_sources/income_data.py`, `api/routes/import_property.py` |
 | URL scraping | `electron/scraper.js`, `src/data_sources/url_parser.py` |
 | Image carousel | `web/src/components/ImageCarousel.tsx` |
 | Sorting/filtering | `web/src/app/deals/page.tsx` (SORT_OPTIONS, client-side) |
-| Property analysis UI | `web/src/components/PropertyAnalysisView.tsx` (shared for deals/saved) |
+| Property analysis UI | `web/src/components/PropertyAnalysisView.tsx` |
 | Walk Score | `src/data_sources/walkscore.py`, `api/routes/import_property.py` |
 | Flood zone | `src/data_sources/fema_flood.py`, `api/routes/import_property.py` |
 | Geocoding | `src/data_sources/geocoder.py` (Census Geocoder API, free, no key required) |
